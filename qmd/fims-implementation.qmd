@@ -168,7 +168,7 @@ where \(y_t\) and \(\hat{y}_t\) are observed and expected landings or index, \(\
 
 # Fit Results
 
-The fitted spawning biomass trajectory is shown in @fig-ssb. Fishery observed and predicted landings are compared in @fig-landings-fit, while survey and CPUE index fits are summarized in @fig-fits-by-fleet and residual patterns are shown in @fig-residuals. Expected age-composition outputs for fishery, BTS, and ATS are shown in @fig-agecomp-fishery, @fig-agecomp-bts, and @fig-agecomp-ats, respectively, while selectivity is shown in @fig-selectivity-curves. Likelihood diagnostics and key parameter summaries are reported in @tbl-diagnostics, @tbl-recruitment-parameters, and @tbl-q.
+The fitted spawning biomass trajectory is shown in @fig-ssb. Fishery observed and predicted landings are compared in @fig-landings-fit, while survey and CPUE index fits are summarized in @fig-fits-by-fleet and residual patterns are shown in @fig-residuals. Expected age-composition outputs for fishery, BTS, and ATS are shown in @fig-agecomp-fishery, @fig-agecomp-bts, and @fig-agecomp-ats, respectively, while selectivity is shown in @fig-selectivity-curves. The time-invariant selectivity assumptions used to initialize each gear are shown for selected years in @fig-selectivity-assumptions. Likelihood diagnostics and key parameter summaries are reported in @tbl-diagnostics, @tbl-recruitment-parameters, and @tbl-q.
 
 ```{r load-fit}
 if (!exists("doc_dir")) {
@@ -325,6 +325,19 @@ agecomp_map <- c(
   ats = which(agecomp_counts == 285)[1]
 )
 
+normalize_agecomp <- function(data, value_col) {
+  value_col <- rlang::ensym(value_col)
+
+  data |>
+    group_by(year) |>
+    mutate(
+      .total = sum(!!value_col, na.rm = TRUE),
+      !!value_col := ifelse(.total > 0, !!value_col / .total, 0)
+    ) |>
+    ungroup() |>
+    select(-.total)
+}
+
 make_agecomp_df <- function(series_id) {
   tibble::tibble(
     year = rep(years, each = length(ages)),
@@ -333,7 +346,8 @@ make_agecomp_df <- function(series_id) {
   ) |>
     group_by(year) |>
     filter(any(expected > 0, na.rm = TRUE)) |>
-    ungroup()
+    ungroup() |>
+    normalize_agecomp(expected)
 }
 
 agecomp_fishery <- make_agecomp_df(agecomp_map[["fishery"]])
@@ -383,6 +397,45 @@ ggplot(sel, aes(x = age, y = estimated)) +
   facet_wrap(~fleet, scales = "free_y") +
   scale_y_continuous(limits = c(0, NA)) +
   labs(x = "Age", y = "Selectivity", title = "Selectivity at Age")
+```
+
+```{r}
+#| label: fig-selectivity-assumptions
+#| fig-cap: "Illustrative selectivity assumptions by gear for selected years. In the current implementation these assumptions are time-invariant, so the curves are identical across years."
+double_logistic <- function(age, inflection_point_asc, slope_asc, inflection_point_desc, slope_desc) {
+  asc <- 1 / (1 + exp(-slope_asc * (age - inflection_point_asc)))
+  desc <- 1 / (1 + exp(slope_desc * (age - inflection_point_desc)))
+  asc * desc
+}
+
+selected_years <- c(min(years), years[ceiling(length(years) / 2)], max(years))
+
+sel_assumptions <- tidyr::crossing(
+  year = selected_years,
+  gear = c("fishery", "bts", "ats", "avo"),
+  age = ages
+) |>
+  mutate(
+    selectivity = double_logistic(
+      age = age,
+      inflection_point_asc = 2,
+      slope_asc = 1,
+      inflection_point_desc = 4,
+      slope_desc = 1
+    ),
+    gear = factor(gear, levels = c("fishery", "bts", "ats", "avo"))
+  )
+
+ggplot(sel_assumptions, aes(x = age, y = selectivity, color = factor(year))) +
+  geom_line(linewidth = 0.8) +
+  facet_wrap(~gear) +
+  scale_y_continuous(limits = c(0, 1)) +
+  labs(
+    x = "Age",
+    y = "Assumed selectivity",
+    color = "Year",
+    title = "Selected Years of Selectivity Assumptions by Gear"
+  )
 ```
 
 ## Diagnostics
@@ -522,7 +575,11 @@ survey_agecomp <- data_ebs |>
   group_by(name) |>
   filter(timing == max(timing, na.rm = TRUE)) |>
   ungroup() |>
-  transmute(fleet = name, age, proportion = value) |>
+  transmute(fleet = name, year = timing, age, proportion = value) |>
+  group_by(fleet, year) |>
+  mutate(proportion = proportion / sum(proportion, na.rm = TRUE)) |>
+  ungroup() |>
+  select(-year) |>
   arrange(fleet, age)
 
 survey_agecomp |>
