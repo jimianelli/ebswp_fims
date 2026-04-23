@@ -1,0 +1,33 @@
+project:
+  type: website
+  output-dir: docs
+  render:
+    - index.qmd
+    - qmd/fims-implementation.qmd
+
+website:
+  title: "ebswp_fims"
+  navbar:
+    left:
+      - href: index.qmd
+        text: Home
+      - href: qmd/fims-implementation.qmd
+        text: FIMS Implementation
+
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    theme: cosmo
+    code-fold: true
+    code-summary: "Show code"
+    code-tools:
+      toggle: true
+      source: true
+    lightbox: true
+    standalone: true
+
+execute:
+  echo: true
+  warning: false
+  message: false

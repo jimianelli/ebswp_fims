@@ -1,0 +1,15 @@
+.DS_Store
+.Rhistory
+.Rproj.user/
+.claude/
+.quarto/
+.vscode/
+*.log
+
+# Local analysis artifacts
+outputs/fims_fit.rds
+outputs/fims_fit_summary.rds
+outputs/qmd/
+
+/.quarto/
+**/*.quarto_ipynb

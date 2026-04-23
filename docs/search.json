@@ -1,0 +1,93 @@
+[
+  {
+    "objectID": "qmd/fims-implementation.html",
+    "href": "qmd/fims-implementation.html",
+    "title": "EBS Pollock FIMS Implementation",
+    "section": "",
+    "text": "This document summarizes a simplified FIMS implementation for EBS pollock based on the openMSE inputs. The model is a single-population catch-at-age assessment with one fishery fleet and four index series (BTS, ATS, AVO, and CPUE). Length compositions and seasonal timing are omitted."
+  },
+  {
+    "objectID": "qmd/fims-implementation.html#structure",
+    "href": "qmd/fims-implementation.html#structure",
+    "title": "EBS Pollock FIMS Implementation",
+    "section": "Structure",
+    "text": "Structure\n\nPopulation: single stock\nFleets: fishery, BTS, ATS, AVO, CPUE\nRecruitment: Beverton–Holt with fixed-effect deviations\nSelectivity: Double logistic for all fleets\nSelectivity sharing: AVO shares ATS selectivity\nGrowth: empirical WAA from stock-level SSB weights\nMaturity: logistic"
+  },
+  {
+    "objectID": "qmd/fims-implementation.html#equations",
+    "href": "qmd/fims-implementation.html#equations",
+    "title": "EBS Pollock FIMS Implementation",
+    "section": "Equations",
+    "text": "Equations\nWe use a standard catch-at-age model. Key components are summarized below.\nRecruitment (Beverton–Holt):\n\\[\nR_t = \\frac{0.8 R_0 h S_{t-1}}{0.2 R_0 \\phi_0 (1-h) + S_{t-1}(h-0.2)} \\exp(\\epsilon_t)\n\\]\nwith deviations (_t) estimated as fixed effects.\nNumbers-at-age dynamics:\n\\[\nN_{a,t} = N_{a-1,t-1} \\exp(-Z_{a-1,t-1})\n\\]\nwith a plus-group at the maximum age.\nInitial numbers at age:\n\\[\nN_{a,1} = R_0 \\exp(-(a-1)M), \\quad N_{A,1} = \\frac{R_0 \\exp(-(A-1)M)}{1 - \\exp(-M)}\n\\]\nTotal mortality:\n\\[\nZ_{a,t} = M_a + \\sum_f F_{f,t} s_{f,a}\n\\]\nwhere (s_{f,a}) is fleet selectivity at age.\nSpawning biomass:\n\\[\nSSB_t = \\sum_a N_{a,t} w_{a} m_{a}\n\\]\nLikelihood components:\nLognormal (landings and indices):\n\\[\n\\ell_{\\text{lnorm}} = \\sum_t \\left[-\\frac{\\left(\\log y_t - \\log \\hat{y}_t\\right)^2}{2\\sigma_t^2} - \\log y_t - \\log(\\sigma_t\\sqrt{2\\pi})\\right]\n\\]\nMultinomial (age compositions):\n\\[\n\\ell_{\\text{mult}} = \\sum_{t} \\log\\left(\\frac{N_t!}{\\prod_a n_{a,t}!}\\right) + \\sum_t \\sum_a n_{a,t} \\log p_{a,t}\n\\]\nwhere (y_t) and (t) are observed and expected landings or index, (t) is the lognormal SD, (n{a,t}) are age-composition counts (or effective sample sizes), and (p{a,t}) are predicted age proportions."
+  },
+  {
+    "objectID": "qmd/fims-implementation.html#spawning-biomass",
+    "href": "qmd/fims-implementation.html#spawning-biomass",
+    "title": "EBS Pollock FIMS Implementation",
+    "section": "Spawning Biomass",
+    "text": "Spawning Biomass\n\n\nShow code\nssb &lt;- est |&gt;\n  filter(label == \"spawning_biomass\") |&gt;\n  mutate(year = map_year(year_i))\n\nggplot(ssb, aes(x = year, y = estimated)) +\n  geom_line(color = \"#1b9e77\", linewidth = 0.8) +\n  scale_y_continuous(limits = c(0, NA)) +\n  labs(x = \"Year\", y = \"SSB\", title = \"Spawning Biomass\")\n\n\n\n\n\n\n\n\nFigure 1: Estimated spawning biomass over time from the fitted EBS pollock FIMS model."
+  },
+  {
+    "objectID": "qmd/fims-implementation.html#landings-fit",
+    "href": "qmd/fims-implementation.html#landings-fit",
+    "title": "EBS Pollock FIMS Implementation",
+    "section": "Landings Fit",
+    "text": "Landings Fit\n\n\nShow code\nfishery_landings_expected &lt;- rep$landings_expected[[which.max(vapply(rep$landings_expected, sum, numeric(1), na.rm = TRUE))]]\n\nland &lt;- tibble::tibble(\n  year = years,\n  expected = fishery_landings_expected,\n  observed = data_ebs |&gt;\n    filter(type == \"landings\", name == \"fishery\") |&gt;\n    arrange(timing) |&gt;\n    pull(value)\n)\n\nggplot(land, aes(x = year)) +\n  geom_line(aes(y = expected), color = \"#377eb8\", linewidth = 0.8) +\n  geom_point(aes(y = observed), color = \"#377eb8\", size = 1.2, alpha = 0.7) +\n  scale_y_continuous(limits = c(0, NA)) +\n  labs(x = \"Year\", y = \"Landings\", title = \"Fishery Landings: Observed vs Expected\")\n\n\n\n\n\n\n\n\nFigure 2: Observed fishery landings and predicted fishery landings from the fitted model."
+  },
+  {
+    "objectID": "qmd/fims-implementation.html#fits-by-fleet",
+    "href": "qmd/fims-implementation.html#fits-by-fleet",
+    "title": "EBS Pollock FIMS Implementation",
+    "section": "Fits by Fleet",
+    "text": "Fits by Fleet\n\n\nShow code\nobs_index &lt;- data_ebs |&gt;\n  filter(type == \"index\", value != -999) |&gt;\n  transmute(series = toupper(name), year = timing, observed = value)\n\npred_index &lt;- purrr::map2_dfr(\n  rep$index_expected,\n  seq_along(rep$index_expected),\n  ~tibble::tibble(series_id = .y, year = years, predicted = .x)\n)\n\nscore_map &lt;- function(pred_tbl, obs_tbl) {\n  obs_names &lt;- sort(unique(obs_tbl$series))\n  pred_ids &lt;- sort(unique(pred_tbl$series_id))\n  perms &lt;- expand.grid(rep(list(pred_ids), length(obs_names)))\n  perms &lt;- perms[apply(perms, 1, function(x) length(unique(x)) == length(x)), , drop = FALSE]\n\n  scores &lt;- purrr::map_dfr(seq_len(nrow(perms)), function(i) {\n    perm &lt;- as.integer(perms[i, ])\n    total_score &lt;- 0\n    for (j in seq_along(obs_names)) {\n      obs_j &lt;- obs_tbl |&gt;\n        filter(series == obs_names[j]) |&gt;\n        select(year, observed)\n      pred_j &lt;- pred_tbl |&gt;\n        filter(series_id == perm[j]) |&gt;\n        select(year, predicted)\n      joined &lt;- left_join(obs_j, pred_j, by = \"year\")\n      total_score &lt;- total_score + sqrt(mean((log(joined$observed) - log(joined$predicted))^2, na.rm = TRUE))\n    }\n    tibble::tibble(row_id = i, total_score = total_score)\n  })\n\n  best &lt;- perms[scores$row_id[which.min(scores$total_score)], ]\n  tibble::tibble(series = obs_names, series_id = as.integer(best[1, ]))\n}\n\nindex_map &lt;- score_map(pred_index, obs_index)\n\nfits &lt;- pred_index |&gt;\n  left_join(index_map, by = \"series_id\") |&gt;\n  left_join(obs_index, by = c(\"series\", \"year\")) |&gt;\n  mutate(series = factor(series, levels = c(\"BTS\", \"ATS\", \"AVO\", \"CPUE\")))\n\nggplot(fits, aes(x = year)) +\n  geom_line(aes(y = predicted), color = \"#377eb8\", linewidth = 0.8) +\n  geom_point(aes(y = observed), color = \"#377eb8\", size = 1.1, alpha = 0.7, na.rm = TRUE) +\n  facet_wrap(~series, scales = \"free_y\") +\n  scale_y_continuous(limits = c(0, NA)) +\n  labs(x = \"Year\", y = \"Observed/Expected\", title = \"Survey Index Fits by Fleet\")\n\n\n\n\n\n\n\n\nFigure 3: Observed and predicted index series for BTS, ATS, AVO, and CPUE."
+  },
+  {
+    "objectID": "qmd/fims-implementation.html#residuals",
+    "href": "qmd/fims-implementation.html#residuals",
+    "title": "EBS Pollock FIMS Implementation",
+    "section": "Residuals",
+    "text": "Residuals\n\n\nShow code\nresid_df &lt;- fits |&gt;\n  mutate(\n    log_resid = log(observed) - log(predicted)\n  )\n\nylim_zero &lt;- function(x) {\n  c(min(0, min(x, na.rm = TRUE)), max(0, max(x, na.rm = TRUE)))\n}\n\nggplot(resid_df, aes(x = year, y = log_resid)) +\n  geom_hline(yintercept = 0, color = \"gray50\", linewidth = 0.4) +\n  geom_point(size = 1.1, alpha = 0.7) +\n  facet_wrap(~series, scales = \"free_y\") +\n  scale_y_continuous(limits = ylim_zero(resid_df$log_resid)) +\n  labs(x = \"Year\", y = \"Log residual\", title = \"Survey Index Log Residuals by Fleet\")\n\n\n\n\n\n\n\n\nFigure 4: Log residuals for survey index fits by fleet."
+  },
+  {
+    "objectID": "qmd/fims-implementation.html#age-composition-fits",
+    "href": "qmd/fims-implementation.html#age-composition-fits",
+    "title": "EBS Pollock FIMS Implementation",
+    "section": "Age Composition Fits",
+    "text": "Age Composition Fits\n\n\nShow code\nagecomp_counts &lt;- vapply(rep$agecomp_expected, function(x) sum(x &gt; 0, na.rm = TRUE), numeric(1))\nagecomp_map &lt;- c(\n  fishery = which(agecomp_counts == 900)[1],\n  bts = which(agecomp_counts == 630)[1],\n  ats = which(agecomp_counts == 285)[1]\n)\n\nmake_agecomp_df &lt;- function(series_id) {\n  tibble::tibble(\n    year = rep(years, each = length(ages)),\n    age = rep(ages, times = length(years)),\n    expected = rep$agecomp_expected[[series_id]]\n  ) |&gt;\n    group_by(year) |&gt;\n    filter(any(expected &gt; 0, na.rm = TRUE)) |&gt;\n    ungroup()\n}\n\nagecomp_fishery &lt;- make_agecomp_df(agecomp_map[[\"fishery\"]])\n\nggplot(agecomp_fishery, aes(x = age, y = expected)) +\n  geom_line(linewidth = 0.5, color = \"#4daf4a\") +\n  facet_wrap(~year) +\n  scale_y_continuous(limits = c(0, NA)) +\n  labs(x = \"Age\", y = \"Expected proportion\", title = \"Fishery Age Composition Fits (Expected)\")\n\n\n\n\n\n\n\n\nFigure 5: Expected fishery age-composition patterns, faceted by year.\n\n\n\n\n\n\n\nShow code\nagecomp_bts &lt;- make_agecomp_df(agecomp_map[[\"bts\"]])\n\nggplot(agecomp_bts, aes(x = age, y = expected)) +\n  geom_line(linewidth = 0.5, color = \"#4daf4a\") +\n  facet_wrap(~year) +\n  scale_y_continuous(limits = c(0, NA)) +\n  labs(x = \"Age\", y = \"Expected proportion\", title = \"BTS Age Composition Fits (Expected)\")\n\n\n\n\n\n\n\n\nFigure 6: Expected BTS age-composition patterns, faceted by year.\n\n\n\n\n\n\n\nShow code\nagecomp_ats &lt;- make_agecomp_df(agecomp_map[[\"ats\"]])\n\nggplot(agecomp_ats, aes(x = age, y = expected)) +\n  geom_line(linewidth = 0.5, color = \"#4daf4a\") +\n  facet_wrap(~year) +\n  scale_y_continuous(limits = c(0, NA)) +\n  labs(x = \"Age\", y = \"Expected proportion\", title = \"ATS Age Composition Fits (Expected)\")\n\n\n\n\n\n\n\n\nFigure 7: Expected ATS age-composition patterns, faceted by year."
+  },
+  {
+    "objectID": "qmd/fims-implementation.html#selectivity-curves",
+    "href": "qmd/fims-implementation.html#selectivity-curves",
+    "title": "EBS Pollock FIMS Implementation",
+    "section": "Selectivity Curves",
+    "text": "Selectivity Curves\n\n\nShow code\nsel &lt;- est |&gt;\n  filter(label == \"sum_selectivity\", !is.na(age_i)) |&gt;\n  mutate(age = age_i)\n\nggplot(sel, aes(x = age, y = estimated)) +\n  geom_line(color = \"#984ea3\", linewidth = 0.8) +\n  facet_wrap(~fleet, scales = \"free_y\") +\n  scale_y_continuous(limits = c(0, NA)) +\n  labs(x = \"Age\", y = \"Selectivity\", title = \"Selectivity at Age\")\n\n\n\n\n\n\n\n\nFigure 8: Estimated selectivity-at-age curves by fleet."
+  },
+  {
+    "objectID": "qmd/fims-implementation.html#diagnostics",
+    "href": "qmd/fims-implementation.html#diagnostics",
+    "title": "EBS Pollock FIMS Implementation",
+    "section": "Diagnostics",
+    "text": "Diagnostics\n\n\nShow code\ndiag_tbl &lt;- est |&gt;\n  filter(!is.na(likelihood)) |&gt;\n  group_by(module_name, label) |&gt;\n  summarize(\n    n = n(),\n    mean_ll = mean(likelihood, na.rm = TRUE),\n    .groups = \"drop\"\n  )\n\ndiag_tbl |&gt;\n  gt() |&gt;\n  tab_header(title = \"Likelihood Diagnostics by Component\")\n\n\n\n\nTable 3: Likelihood diagnostics by model component.\n\n\n\n\n\n\n\n\n\nLikelihood Diagnostics by Component\n\n\nmodule_name\nlabel\nn\nmean_ll\n\n\n\n\nFleet\nagecomp_expected\n2745\n-23.322321\n\n\nFleet\nindex_expected\n183\n-4.445541\n\n\nFleet\nlandings_expected\n61\n-5.639865"
+  },
+  {
+    "objectID": "index.html",
+    "href": "index.html",
+    "title": "ebswp_fims",
+    "section": "",
+    "text": "This site contains the rendered Quarto outputs for the EBS walleye pollock FIMS configuration in this repository.\n\n\n\nFIMS implementation report\n\n\n\n\nTo rebuild the site locally:\nRscript scripts/01_build_data.R\nRscript scripts/02_fit_model.R\nquarto render\nThe rendered website is written to docs/ so it can be served directly by GitHub Pages."
+  },
+  {
+    "objectID": "index.html#reports",
+    "href": "index.html#reports",
+    "title": "ebswp_fims",
+    "section": "",
+    "text": "FIMS implementation report"
+  },
+  {
+    "objectID": "index.html#render",
+    "href": "index.html#render",
+    "title": "ebswp_fims",
+    "section": "",
+    "text": "To rebuild the site locally:\nRscript scripts/01_build_data.R\nRscript scripts/02_fit_model.R\nquarto render\nThe rendered website is written to docs/ so it can be served directly by GitHub Pages."
+  }
+]

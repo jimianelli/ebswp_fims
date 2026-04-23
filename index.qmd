@@ -1,0 +1,25 @@
+---
+title: "ebswp_fims"
+---
+
+# EBS Walleye Pollock FIMS
+
+This site contains the rendered Quarto outputs for the EBS walleye pollock
+FIMS configuration in this repository.
+
+## Reports
+
+- [FIMS implementation report](qmd/fims-implementation.qmd)
+
+## Render
+
+To rebuild the site locally:
+
+```sh
+Rscript scripts/01_build_data.R
+Rscript scripts/02_fit_model.R
+quarto render
+```
+
+The rendered website is written to `docs/` so it can be served directly by
+GitHub Pages.

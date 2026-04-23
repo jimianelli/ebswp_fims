@@ -1,0 +1,537 @@
+---
+title: "EBS Pollock FIMS Implementation"
+execute:
+  echo: true
+  warning: false
+  message: false
+format:
+  html:
+    embed-resources: true
+    lightbox: true
+---
+
+```{r setup}
+#| include: false
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tidyr)
+  library(ggplot2)
+  library(ggthemes)
+  library(gt)
+  library(FIMS)
+})
+
+theme_set(ggthemes::theme_few())
+
+if (requireNamespace("FIMSdiags", quietly = TRUE)) {
+  library(FIMSdiags)
+}
+```
+
+# Overview
+
+This document summarizes a simplified FIMS implementation for EBS pollock based on the openMSE inputs. The model is a single-population catch-at-age assessment with one fishery fleet and four index series (BTS, ATS, AVO, and CPUE). Length compositions and seasonal timing are omitted.
+
+# Data Inputs
+
+```{r load-data}
+doc_dir <- tryCatch(dirname(knitr::current_input()), error = function(e) NA_character_)
+if (is.na(doc_dir) || doc_dir == ".") doc_dir <- getwd()
+project_root <- if (file.exists(file.path(doc_dir, "data"))) doc_dir else file.path(doc_dir, "..")
+input_path <- file.path(project_root, "data", "ebs_fims_data.rds")
+if (!file.exists(input_path)) {
+  stop(
+    "Missing input data at: ",
+    normalizePath(input_path, mustWork = FALSE),
+    "\nRun: Rscript scripts/01_build_data.R"
+  )
+}
+
+payload <- readRDS(input_path)
+
+data_ebs <- payload$data_ebs
+years <- payload$years
+ages <- payload$ages
+```
+
+The input summary is shown in @tbl-input-summary, and data availability by fleet and data type is shown in @tbl-data-availability.
+
+```{r}
+#| label: tbl-input-summary
+#| tbl-cap: "Summary of the EBS pollock FIMS input data."
+# Basic input summary
+summary_tbl <- tibble::tibble(
+  item = c(
+    "Years",
+    "Ages",
+    "Fleets",
+    "Data types"
+  ),
+  value = c(
+    paste0(min(years), "–", max(years), " (", length(years), ")"),
+    paste0(min(ages), "–", max(ages), " (", length(ages), ")"),
+    paste(sort(unique(data_ebs$name)), collapse = ", "),
+    paste(sort(unique(data_ebs$type)), collapse = ", ")
+  )
+)
+
+summary_tbl |>
+  gt() |>
+  tab_header(title = "FIMS Input Summary")
+```
+
+```{r}
+#| label: tbl-data-availability
+#| tbl-cap: "Available observations by fleet and data type."
+# Data availability by fleet/type
+availability <- data_ebs |>
+  filter(value != -999) |>
+  group_by(name, type) |>
+  summarize(
+    n_obs = n(),
+    years = paste0(min(timing, na.rm = TRUE), "–", max(timing, na.rm = TRUE)),
+    .groups = "drop"
+  )
+
+availability |>
+  gt() |>
+  tab_header(title = "Data Availability by Fleet")
+```
+
+# Model Implementation
+
+## Structure
+
+- **Population**: single stock
+- **Fleets**: fishery, BTS, ATS, AVO, CPUE
+- **Recruitment**: Beverton–Holt with fixed-effect deviations
+- **Selectivity**: Double logistic for all fleets
+- **Selectivity sharing**: AVO shares ATS selectivity
+- **Growth**: empirical WAA from stock-level SSB weights
+- **Maturity**: logistic
+
+## Equations
+
+We use a standard catch-at-age model. Key components are summarized below.
+
+Recruitment (Beverton–Holt):
+
+$$
+R_t = \frac{0.8 R_0 h S_{t-1}}{0.2 R_0 \phi_0 (1-h) + S_{t-1}(h-0.2)} \exp(\epsilon_t)
+$$
+
+with deviations \(\epsilon_t\) estimated as fixed effects.
+
+Numbers-at-age dynamics:
+
+$$
+N_{a,t} = N_{a-1,t-1} \exp(-Z_{a-1,t-1})
+$$
+
+with a plus-group at the maximum age.
+
+Initial numbers at age:
+
+$$
+N_{a,1} = R_0 \exp(-(a-1)M), \quad N_{A,1} = \frac{R_0 \exp(-(A-1)M)}{1 - \exp(-M)}
+$$
+
+Total mortality:
+
+$$
+Z_{a,t} = M_a + \sum_f F_{f,t} s_{f,a}
+$$
+
+where \(s_{f,a}\) is fleet selectivity at age.
+
+Spawning biomass:
+
+$$
+SSB_t = \sum_a N_{a,t} w_{a} m_{a}
+$$
+
+Likelihood components:
+
+Lognormal (landings and indices):
+
+$$
+\ell_{\text{lnorm}} = \sum_t \left[-\frac{\left(\log y_t - \log \hat{y}_t\right)^2}{2\sigma_t^2} - \log y_t - \log(\sigma_t\sqrt{2\pi})\right]
+$$
+
+Multinomial (age compositions):
+
+$$
+\ell_{\text{mult}} = \sum_{t} \log\left(\frac{N_t!}{\prod_a n_{a,t}!}\right) + \sum_t \sum_a n_{a,t} \log p_{a,t}
+$$
+
+where \(y_t\) and \(\hat{y}_t\) are observed and expected landings or index, \(\sigma_t\) is the lognormal SD, \(n_{a,t}\) are age-composition counts (or effective sample sizes), and \(p_{a,t}\) are predicted age proportions.
+
+# Fit Results
+
+The fitted spawning biomass trajectory is shown in @fig-ssb. Fishery observed and predicted landings are compared in @fig-landings-fit, while survey and CPUE index fits are summarized in @fig-fits-by-fleet and residual patterns are shown in @fig-residuals. Expected age-composition outputs for fishery, BTS, and ATS are shown in @fig-agecomp-fishery, @fig-agecomp-bts, and @fig-agecomp-ats, respectively, while selectivity is shown in @fig-selectivity-curves. Likelihood diagnostics and key parameter summaries are reported in @tbl-diagnostics, @tbl-recruitment-parameters, and @tbl-q.
+
+```{r load-fit}
+if (!exists("doc_dir")) {
+  doc_dir <- tryCatch(dirname(knitr::current_input()), error = function(e) NA_character_)
+  if (is.na(doc_dir) || doc_dir == ".") doc_dir <- getwd()
+}
+if (!exists("project_root")) {
+  project_root <- if (file.exists(file.path(doc_dir, "data"))) doc_dir else file.path(doc_dir, "..")
+}
+fit_path <- file.path(project_root, "outputs", "fims_fit_summary.rds")
+if (!file.exists(fit_path)) {
+  stop(
+    "Missing model fit summary at: ",
+    normalizePath(fit_path, mustWork = FALSE),
+    "\nRun: Rscript scripts/02_fit_model.R"
+  )
+}
+
+fit <- readRDS(fit_path)
+est <- fit$estimates
+rep <- fit$report
+
+# Map year index to actual years (robust to 0- or 1-based index)
+map_year <- function(year_i) {
+  years[year_i]
+}
+```
+
+## Spawning Biomass
+
+```{r}
+#| label: fig-ssb
+#| fig-cap: "Estimated spawning biomass over time from the fitted EBS pollock FIMS model."
+ssb <- est |>
+  filter(label == "spawning_biomass") |>
+  mutate(year = map_year(year_i))
+
+ggplot(ssb, aes(x = year, y = estimated)) +
+  geom_line(color = "#1b9e77", linewidth = 0.8) +
+  scale_y_continuous(limits = c(0, NA)) +
+  labs(x = "Year", y = "SSB", title = "Spawning Biomass")
+```
+
+## Landings Fit
+
+```{r}
+#| label: fig-landings-fit
+#| fig-cap: "Observed fishery landings and predicted fishery landings from the fitted model."
+fishery_landings_expected <- rep$landings_expected[[which.max(vapply(rep$landings_expected, sum, numeric(1), na.rm = TRUE))]]
+
+land <- tibble::tibble(
+  year = years,
+  expected = fishery_landings_expected,
+  observed = data_ebs |>
+    filter(type == "landings", name == "fishery") |>
+    arrange(timing) |>
+    pull(value)
+)
+
+ggplot(land, aes(x = year)) +
+  geom_line(aes(y = expected), color = "#377eb8", linewidth = 0.8) +
+  geom_point(aes(y = observed), color = "#377eb8", size = 1.2, alpha = 0.7) +
+  scale_y_continuous(limits = c(0, NA)) +
+  labs(x = "Year", y = "Landings", title = "Fishery Landings: Observed vs Expected")
+```
+
+## Fits by Fleet
+
+```{r}
+#| label: fig-fits-by-fleet
+#| fig-cap: "Observed and predicted index series for BTS, ATS, AVO, and CPUE."
+obs_index <- data_ebs |>
+  filter(type == "index", value != -999) |>
+  transmute(series = toupper(name), year = timing, observed = value)
+
+pred_index <- purrr::map2_dfr(
+  rep$index_expected,
+  seq_along(rep$index_expected),
+  ~tibble::tibble(series_id = .y, year = years, predicted = .x)
+)
+
+score_map <- function(pred_tbl, obs_tbl) {
+  obs_names <- sort(unique(obs_tbl$series))
+  pred_ids <- sort(unique(pred_tbl$series_id))
+  perms <- expand.grid(rep(list(pred_ids), length(obs_names)))
+  perms <- perms[apply(perms, 1, function(x) length(unique(x)) == length(x)), , drop = FALSE]
+
+  scores <- purrr::map_dfr(seq_len(nrow(perms)), function(i) {
+    perm <- as.integer(perms[i, ])
+    total_score <- 0
+    for (j in seq_along(obs_names)) {
+      obs_j <- obs_tbl |>
+        filter(series == obs_names[j]) |>
+        select(year, observed)
+      pred_j <- pred_tbl |>
+        filter(series_id == perm[j]) |>
+        select(year, predicted)
+      joined <- left_join(obs_j, pred_j, by = "year")
+      total_score <- total_score + sqrt(mean((log(joined$observed) - log(joined$predicted))^2, na.rm = TRUE))
+    }
+    tibble::tibble(row_id = i, total_score = total_score)
+  })
+
+  best <- perms[scores$row_id[which.min(scores$total_score)], ]
+  tibble::tibble(series = obs_names, series_id = as.integer(best[1, ]))
+}
+
+index_map <- score_map(pred_index, obs_index)
+
+fits <- pred_index |>
+  left_join(index_map, by = "series_id") |>
+  left_join(obs_index, by = c("series", "year")) |>
+  mutate(series = factor(series, levels = c("BTS", "ATS", "AVO", "CPUE")))
+
+ggplot(fits, aes(x = year)) +
+  geom_line(aes(y = predicted), color = "#377eb8", linewidth = 0.8) +
+  geom_point(aes(y = observed), color = "#377eb8", size = 1.1, alpha = 0.7, na.rm = TRUE) +
+  facet_wrap(~series, scales = "free_y") +
+  scale_y_continuous(limits = c(0, NA)) +
+  labs(x = "Year", y = "Observed/Expected", title = "Survey Index Fits by Fleet")
+```
+
+## Residuals
+
+```{r}
+#| label: fig-residuals
+#| fig-cap: "Log residuals for survey index fits by fleet."
+resid_df <- fits |>
+  mutate(
+    log_resid = log(observed) - log(predicted)
+  )
+
+ylim_zero <- function(x) {
+  c(min(0, min(x, na.rm = TRUE)), max(0, max(x, na.rm = TRUE)))
+}
+
+ggplot(resid_df, aes(x = year, y = log_resid)) +
+  geom_hline(yintercept = 0, color = "gray50", linewidth = 0.4) +
+  geom_point(size = 1.1, alpha = 0.7) +
+  facet_wrap(~series, scales = "free_y") +
+  scale_y_continuous(limits = ylim_zero(resid_df$log_resid)) +
+  labs(x = "Year", y = "Log residual", title = "Survey Index Log Residuals by Fleet")
+```
+
+## Age Composition Fits
+
+```{r}
+#| label: fig-agecomp-fishery
+#| fig-cap: "Expected fishery age-composition patterns, faceted by year."
+agecomp_counts <- vapply(rep$agecomp_expected, function(x) sum(x > 0, na.rm = TRUE), numeric(1))
+agecomp_map <- c(
+  fishery = which(agecomp_counts == 900)[1],
+  bts = which(agecomp_counts == 630)[1],
+  ats = which(agecomp_counts == 285)[1]
+)
+
+make_agecomp_df <- function(series_id) {
+  tibble::tibble(
+    year = rep(years, each = length(ages)),
+    age = rep(ages, times = length(years)),
+    expected = rep$agecomp_expected[[series_id]]
+  ) |>
+    group_by(year) |>
+    filter(any(expected > 0, na.rm = TRUE)) |>
+    ungroup()
+}
+
+agecomp_fishery <- make_agecomp_df(agecomp_map[["fishery"]])
+
+ggplot(agecomp_fishery, aes(x = age, y = expected)) +
+  geom_line(linewidth = 0.5, color = "#4daf4a") +
+  facet_wrap(~year) +
+  scale_y_continuous(limits = c(0, NA)) +
+  labs(x = "Age", y = "Expected proportion", title = "Fishery Age Composition Fits (Expected)")
+```
+
+```{r}
+#| label: fig-agecomp-bts
+#| fig-cap: "Expected BTS age-composition patterns, faceted by year."
+agecomp_bts <- make_agecomp_df(agecomp_map[["bts"]])
+
+ggplot(agecomp_bts, aes(x = age, y = expected)) +
+  geom_line(linewidth = 0.5, color = "#4daf4a") +
+  facet_wrap(~year) +
+  scale_y_continuous(limits = c(0, NA)) +
+  labs(x = "Age", y = "Expected proportion", title = "BTS Age Composition Fits (Expected)")
+```
+
+```{r}
+#| label: fig-agecomp-ats
+#| fig-cap: "Expected ATS age-composition patterns, faceted by year."
+agecomp_ats <- make_agecomp_df(agecomp_map[["ats"]])
+
+ggplot(agecomp_ats, aes(x = age, y = expected)) +
+  geom_line(linewidth = 0.5, color = "#4daf4a") +
+  facet_wrap(~year) +
+  scale_y_continuous(limits = c(0, NA)) +
+  labs(x = "Age", y = "Expected proportion", title = "ATS Age Composition Fits (Expected)")
+```
+
+## Selectivity Curves
+
+```{r}
+#| label: fig-selectivity-curves
+#| fig-cap: "Estimated selectivity-at-age curves by fleet."
+sel <- est |>
+  filter(label == "sum_selectivity", !is.na(age_i)) |>
+  mutate(age = age_i)
+
+ggplot(sel, aes(x = age, y = estimated)) +
+  geom_line(color = "#984ea3", linewidth = 0.8) +
+  facet_wrap(~fleet, scales = "free_y") +
+  scale_y_continuous(limits = c(0, NA)) +
+  labs(x = "Age", y = "Selectivity", title = "Selectivity at Age")
+```
+
+## Diagnostics
+
+```{r}
+#| label: tbl-diagnostics
+#| tbl-cap: "Likelihood diagnostics by model component."
+diag_tbl <- est |>
+  filter(!is.na(likelihood)) |>
+  group_by(module_name, label) |>
+  summarize(
+    n = n(),
+    mean_ll = mean(likelihood, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+diag_tbl |>
+  gt() |>
+  tab_header(title = "Likelihood Diagnostics by Component")
+```
+
+# Parameter Tables
+
+```{r}
+#| label: tbl-recruitment-parameters
+#| tbl-cap: "Estimated recruitment parameters retained in the fitted model summary."
+param_tbl <- est |>
+  filter(label %in% c("log_rzero", "logit_steep")) |>
+  select(module_name, label, estimated) |>
+  distinct()
+
+param_tbl |>
+  gt() |>
+  tab_header(title = "Key Recruitment Parameters")
+```
+
+```{r}
+#| label: tbl-q
+#| tbl-cap: "Estimated survey catchability coefficients."
+q_tbl <- est |>
+  filter(label == "log_q") |>
+  mutate(q = exp(estimated)) |>
+  select(fleet, q)
+
+q_tbl |>
+  gt() |>
+  tab_header(title = "Survey Catchability (q)")
+```
+
+# Data Tables
+
+Supporting data tables are provided in @tbl-weight-at-age, @tbl-initial-naa, @tbl-terminal-naa, @tbl-maturity, @tbl-catch-at-age, and @tbl-survey-agecomp.
+
+```{r}
+#| label: tbl-weight-at-age
+#| tbl-cap: "Weight-at-age values used in the most recent model year."
+waa_tbl <- data_ebs |>
+  filter(type == "weight_at_age") |>
+  filter(timing == max(timing, na.rm = TRUE)) |>
+  select(age, value) |>
+  arrange(age)
+
+waa_tbl |>
+  gt() |>
+  tab_header(title = "Weight-at-Age (Most Recent Year)")
+```
+
+```{r}
+#| label: tbl-initial-naa
+#| tbl-cap: "Estimated initial numbers-at-age."
+naa_tbl <- est |>
+  filter(label == "numbers_at_age") |>
+  transmute(year = map_year(year_i), age = age_i, value = estimated) |>
+  arrange(year, age)
+
+initial_naa_tbl <- naa_tbl |>
+  filter(year == min(year, na.rm = TRUE))
+
+initial_naa_tbl |>
+  gt() |>
+  fmt_number(columns = value, decimals = 3) |>
+  tab_header(title = "Initial Numbers-at-Age")
+```
+
+```{r}
+#| label: tbl-terminal-naa
+#| tbl-cap: "Estimated terminal numbers-at-age."
+terminal_naa_tbl <- naa_tbl |>
+  filter(year == max(year, na.rm = TRUE))
+
+terminal_naa_tbl |>
+  gt() |>
+  fmt_number(columns = value, decimals = 3) |>
+  tab_header(title = "Terminal Numbers-at-Age")
+```
+
+```{r}
+#| label: tbl-maturity
+#| tbl-cap: "Maturity-at-age schedule used for presentation in the report."
+mat_tbl <- tibble::tibble(
+  age = ages,
+  value = c(
+    0, 0.008, 0.289, 0.641, 0.842,
+    0.901, 0.947, 0.963, 0.97, 1,
+    1, 1, 1, 1, 1
+  )
+) |>
+  arrange(age)
+
+mat_tbl |>
+  gt() |>
+  fmt_number(columns = value, decimals = 3) |>
+  tab_header(title = "Maturity-at-Age")
+```
+
+```{r}
+#| label: tbl-catch-at-age
+#| tbl-cap: "Estimated catch-at-age in the terminal year for the fishery."
+catch_tbl <- est |>
+  filter(label == "landings_numbers_at_age", fleet == "fishery") |>
+  mutate(year = map_year(year_i)) |>
+  filter(year == max(year, na.rm = TRUE)) |>
+  transmute(age = age_i, value = dplyr::coalesce(estimated, expected)) |>
+  arrange(age)
+
+catch_tbl |>
+  gt() |>
+  tab_header(title = "Catch-at-Age (Most Recent Year)")
+```
+
+```{r}
+#| label: tbl-survey-agecomp
+#| tbl-cap: "Observed survey age compositions in the most recent year with data."
+survey_agecomp <- data_ebs |>
+  filter(type == "age_comp", name %in% c("bts", "ats")) |>
+  filter(value != -999) |>
+  group_by(name) |>
+  filter(timing == max(timing, na.rm = TRUE)) |>
+  ungroup() |>
+  transmute(fleet = name, age, proportion = value) |>
+  arrange(fleet, age)
+
+survey_agecomp |>
+  gt(groupname_col = "fleet") |>
+  tab_header(title = "Survey Proportions-at-Age (Most Recent Year)")
+```
+
+# Notes
+
+- AVO selectivity sharing (`selectivity_shared_with = "ats"`) is not recognized by FIMS ≥ 0.9.0; AVO selectivity is currently estimated independently.
+- ATS weight-at-age is used as the growth input.
+- Composition likelihoods use a multinomial distribution with sample sizes taken from the openMSE inputs.
