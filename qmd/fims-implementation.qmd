@@ -951,7 +951,7 @@ model_status_tbl |>
 
 ```{r}
 #| label: fig-ssb-recruitment
-#| fig-cap: "Fitted spawning biomass and expected recruitment trajectories from run0 and TVselex, with the ADMB 2024 derived output overlaid for comparison."
+#| fig-cap: "Fitted spawning biomass and expected recruitment trajectories from run0 and TVselex, with the ADMB 2024 derived output overlaid for comparison. FIMS SSB is divided by 2 before plotting."
 make_diag_series <- function(estimates, model_name) {
   recruitment_values <- estimates |>
     filter(label == "expected_recruitment") |>
@@ -961,7 +961,7 @@ make_diag_series <- function(estimates, model_name) {
   ssb_values <- estimates |>
     filter(label == "spawning_biomass") |>
     mutate(year = map_year(year_i)) |>
-    transmute(model = model_name, source = "FIMS", year, value = estimated, quantity = "SSB")
+    transmute(model = model_name, source = "FIMS", year, value = estimated / 2, quantity = "SSB")
 
   bind_rows(ssb_values, recruitment_values)
 }
