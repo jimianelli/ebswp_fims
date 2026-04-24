@@ -64,10 +64,24 @@ build_fims_inputs_from_payload <- function(payload) {
       ),
       by = c("module_name", "label", "time")
     ) |>
+    dplyr::rows_update(
+      tibble::tibble(
+        module_name = "Selectivity",
+        fleet_name = "avo",
+        label = c(
+          "inflection_point_asc",
+          "slope_asc",
+          "inflection_point_desc",
+          "slope_desc"
+        ),
+        value = c(1.5, 2.0, 8.0, 0.1),
+        estimation_type = "constant"
+      ),
+      by = c("module_name", "fleet_name", "label")
+    ) |>
     dplyr::mutate(
       selectivity_shared_with = dplyr::case_when(
         module_name == "Selectivity" & fleet_name == "cpue" ~ "fishery",
-        module_name == "Selectivity" & fleet_name == "avo" ~ "ats",
         TRUE ~ NA_character_
       )
     )

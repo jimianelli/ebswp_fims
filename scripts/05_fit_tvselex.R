@@ -44,6 +44,21 @@ pars_tvselex_base <- create_default_parameters(cfg_tvselex, data_4_model) |>
       estimation_type = "fixed_effects"
     ),
     by = c("module_name", "label", "time")
+  ) |>
+  dplyr::rows_update(
+    tibble::tibble(
+      module_name = "Selectivity",
+      fleet_name = "avo",
+      label = c(
+        "inflection_point_asc",
+        "slope_asc",
+        "inflection_point_desc",
+        "slope_desc"
+      ),
+      value = c(1.5, 2.0, 8.0, 0.1),
+      estimation_type = "constant"
+    ),
+    by = c("module_name", "fleet_name", "label")
   )
 
 fishery_tvselex <- pars_tvselex_base |>
@@ -68,7 +83,6 @@ pars_tvselex <- pars_tvselex_base |>
   dplyr::mutate(
     selectivity_shared_with = dplyr::case_when(
       module_name == "Selectivity" & fleet_name == "cpue" ~ "fishery",
-      module_name == "Selectivity" & fleet_name == "avo" ~ "ats",
       TRUE ~ NA_character_
     )
   )
@@ -77,6 +91,31 @@ out_path <- file.path(project_root, "outputs", "tvselex_fit_summary.rds")
 if (!dir.exists(dirname(out_path))) dir.create(dirname(out_path), recursive = TRUE)
 
 input_tvselex <- initialize_fims(pars_tvselex, data_4_model)
+
+get_gradient_diagnostics <- function(fit, pars) {
+  gradients <- as.numeric(get_obj(fit)$gr(get_opt(fit)$par))
+  estimates <- as.numeric(get_opt(fit)$par)
+  estimable <- pars |>
+    dplyr::filter(estimation_type %in% c("fixed_effects", "random_effects")) |>
+    dplyr::mutate(parameter_index = dplyr::row_number())
+
+  if (nrow(estimable) != length(gradients)) {
+    return(tibble::tibble(
+      parameter_index = seq_along(gradients),
+      estimated = estimates,
+      gradient = gradients,
+      abs_gradient = abs(gradients)
+    ))
+  }
+
+  estimable |>
+    dplyr::mutate(
+      estimated = estimates,
+      gradient = gradients,
+      abs_gradient = abs(gradients)
+    ) |>
+    dplyr::arrange(dplyr::desc(abs_gradient))
+}
 
 fit_summary <- tryCatch(
   {
@@ -96,6 +135,7 @@ fit_summary <- tryCatch(
       version = get_version(fit),
       timing = get_timing(fit),
       number_of_parameters = get_number_of_parameters(fit),
+      gradient_diagnostics = get_gradient_diagnostics(fit, pars_tvselex),
       fishery_selectivity_rows = sum(
         pars_tvselex$module_name == "Selectivity" &
           pars_tvselex$fleet_name == "fishery" &

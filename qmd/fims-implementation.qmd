@@ -126,8 +126,8 @@ availability |>
 - **Population**: single stock
 - **Fleets**: fishery, BTS, ATS, AVO, CPUE
 - **Recruitment**: Beverton–Holt with fixed-effect deviations
-- **Selectivity**: asymptotic logistic for fishery and BTS; double logistic for ATS and AVO
-- **Selectivity sharing**: AVO shares ATS selectivity
+- **Selectivity**: asymptotic logistic for fishery and BTS; estimated double logistic for ATS; fixed double logistic for AVO
+- **Selectivity sharing**: CPUE shares fishery selectivity
 - **Growth**: empirical WAA from stock-level SSB weights
 - **Maturity**: logistic
 
@@ -137,8 +137,8 @@ Two model runs are defined in this implementation:
 
 | Run | Description | Selectivity treatment |
 |---|---|---|
-| `run0` | Initial FIMS run used for the current fitted results. | Fishery and BTS use time-invariant logistic selectivity; ATS and AVO use time-invariant double-logistic selectivity. |
-| `TVselex` | Time-varying fishery selectivity run. | Fishery selectivity is changed to a double-logistic form and only the ascending inflection point is expanded over model years. |
+| `run0` | Initial FIMS run used for the current fitted results. | Fishery and BTS use time-invariant logistic selectivity; ATS uses time-invariant double-logistic selectivity; AVO double-logistic selectivity is fixed. |
+| `TVselex` | Time-varying fishery selectivity run. | Fishery selectivity is changed to a double-logistic form and only the ascending inflection point is expanded over model years; AVO double-logistic selectivity is fixed. |
 
 The requested `TVselex` run is specified with the FIMS `DoubleLogisticSelectivity` module because the installed FIMS version used here (`r as.character(utils::packageVersion("FIMS"))`) exposes logistic and double-logistic selectivity classes, but not a double-normal selectivity class.
 
@@ -172,10 +172,24 @@ pars <- create_default_parameters(cfg, data_4_model) |>
     ),
     by = c("module_name", "label", "time")
   ) |>
+  dplyr::rows_update(
+    tibble::tibble(
+      module_name = "Selectivity",
+      fleet_name = "avo",
+      label = c(
+        "inflection_point_asc",
+        "slope_asc",
+        "inflection_point_desc",
+        "slope_desc"
+      ),
+      value = c(1.5, 2.0, 8.0, 0.1),
+      estimation_type = "constant"
+    ),
+    by = c("module_name", "fleet_name", "label")
+  ) |>
   dplyr::mutate(
     selectivity_shared_with = dplyr::case_when(
       module_name == "Selectivity" & fleet_name == "cpue" ~ "fishery",
-      module_name == "Selectivity" & fleet_name == "avo" ~ "ats",
       TRUE ~ NA_character_
     )
   )
@@ -210,6 +224,21 @@ pars_tvselex_base <- create_default_parameters(cfg_tvselex, data_4_model) |>
       estimation_type = "fixed_effects"
     ),
     by = c("module_name", "label", "time")
+  ) |>
+  dplyr::rows_update(
+    tibble::tibble(
+      module_name = "Selectivity",
+      fleet_name = "avo",
+      label = c(
+        "inflection_point_asc",
+        "slope_asc",
+        "inflection_point_desc",
+        "slope_desc"
+      ),
+      value = c(1.5, 2.0, 8.0, 0.1),
+      estimation_type = "constant"
+    ),
+    by = c("module_name", "fleet_name", "label")
   )
 
 fishery_tvselex <- pars_tvselex_base |>
@@ -234,7 +263,6 @@ pars_tvselex <- pars_tvselex_base |>
   dplyr::mutate(
     selectivity_shared_with = dplyr::case_when(
       module_name == "Selectivity" & fleet_name == "cpue" ~ "fishery",
-      module_name == "Selectivity" & fleet_name == "avo" ~ "ats",
       TRUE ~ NA_character_
     )
   )
@@ -636,7 +664,7 @@ ggplot(selectivity_curves, aes(x = age, y = selectivity)) +
 
 ```{r}
 #| label: fig-selectivity-assumptions
-#| fig-cap: "Illustrative selectivity assumptions by gear for selected years. Fishery and BTS are initialized with asymptotic logistic selectivity, while ATS and AVO use double-logistic assumptions. In the current implementation these assumptions are time-invariant, so the curves are identical across years."
+#| fig-cap: "Illustrative selectivity assumptions by gear for selected years. Fishery and BTS are initialized with asymptotic logistic selectivity, ATS uses an estimated double-logistic curve, and AVO uses a fixed double-logistic curve. In the current implementation these assumptions are time-invariant, so the curves are identical across years."
 selected_years <- c(min(years), years[ceiling(length(years) / 2)], max(years))
 
 sel_assumptions <- tidyr::crossing(
@@ -653,10 +681,10 @@ sel_assumptions <- tidyr::crossing(
       ),
       TRUE ~ double_logistic(
         age = age,
-        inflection_point_asc = 2,
-        slope_asc = 1,
-        inflection_point_desc = 4,
-        slope_desc = 1
+        inflection_point_asc = dplyr::if_else(gear == "avo", 1.5, 2),
+        slope_asc = dplyr::if_else(gear == "avo", 2.0, 1),
+        inflection_point_desc = dplyr::if_else(gear == "avo", 8.0, 4),
+        slope_desc = dplyr::if_else(gear == "avo", 0.1, 1)
       )
     ),
     gear = factor(gear, levels = c("fishery", "bts", "ats", "avo"))
@@ -771,34 +799,6 @@ diag_tbl |>
   tab_header(title = "Likelihood Diagnostics by Component")
 ```
 
-# Parameter Tables
-
-```{r}
-#| label: tbl-recruitment-parameters
-#| tbl-cap: "Estimated recruitment parameters retained in the fitted model summary."
-param_tbl <- est |>
-  filter(label %in% c("log_rzero", "logit_steep")) |>
-  select(module_name, label, estimated) |>
-  distinct()
-
-param_tbl |>
-  gt_report() |>
-  tab_header(title = "Key Recruitment Parameters")
-```
-
-```{r}
-#| label: tbl-q
-#| tbl-cap: "Estimated survey catchability coefficients."
-q_tbl <- est |>
-  filter(label == "log_q") |>
-  mutate(q = exp(estimated)) |>
-  select(fleet, q)
-
-q_tbl |>
-  gt_report() |>
-  tab_header(title = "Survey Catchability (q)")
-```
-
 # Fit Results: `TVselex`
 
 ```{r}
@@ -854,6 +854,60 @@ tvselex_status <- if (is.null(tvselex)) {
   )
 }
 
+terminal_ssb <- function(report) {
+  if (is.null(report$spawning_biomass)) {
+    return("")
+  }
+
+  ssb_values <- if (is.list(report$spawning_biomass)) {
+    report$spawning_biomass[[1]]
+  } else {
+    report$spawning_biomass
+  }
+
+  sprintf("%.2f", tail(ssb_values, 1))
+}
+
+run0_status <- tibble::tibble(
+  metric = c(
+    "Run status",
+    "FIMS version",
+    "Fixed effects",
+    "Random effects",
+    "Time-varying fishery selectivity rows",
+    "Max gradient",
+    "Total NLL",
+    "Terminal SB",
+    "Interpretation"
+  ),
+  run0 = c(
+    "fit completed",
+    as.character(fit$version),
+    as.character(fit$number_of_parameters[["fixed_effects"]]),
+    as.character(fit$number_of_parameters[["random_effects"]]),
+    "0",
+    sprintf("%.5f", fit$max_gradient),
+    ifelse(is.null(rep$jnll), "", sprintf("%.2f", rep$jnll)),
+    terminal_ssb(rep),
+    if (is.finite(fit$max_gradient) && fit$max_gradient <= 0.01) {
+      "run0 completed and appears well converged by gradient threshold."
+    } else {
+      "run0 completed, but the maximum gradient is too high for the run to be treated as a final model."
+    }
+  )
+)
+
+run_status_comparison <- run0_status |>
+  dplyr::full_join(
+    tvselex_status |>
+      dplyr::rename(TVselex = value),
+    by = "metric"
+  ) |>
+  dplyr::mutate(
+    run0 = dplyr::coalesce(run0, ""),
+    TVselex = dplyr::coalesce(TVselex, "")
+  )
+
 tvselex_fixed_effects <- tvselex_status$value[tvselex_status$metric == "Fixed effects"]
 if (length(tvselex_fixed_effects) == 0) tvselex_fixed_effects <- "not available"
 tvselex_fishery_rows <- tvselex_status$value[tvselex_status$metric == "Time-varying fishery selectivity rows"]
@@ -866,112 +920,85 @@ The reduced `TVselex` formulation completed, but the maximum gradient remains la
 
 ```{r}
 #| label: tbl-tvselex-status
-#| tbl-cap: "Status summary for the attempted TVselex model run."
-tvselex_status |>
+#| tbl-cap: "Status summary comparing run0 and the attempted TVselex model run."
+run_status_comparison |>
   gt_report() |>
-  tab_header(title = "TVselex Run Status")
-```
-
-# Data Tables
-
-Supporting data tables are provided in @tbl-weight-at-age, @tbl-initial-naa, @tbl-terminal-naa, @tbl-maturity, @tbl-catch-at-age, and @tbl-survey-agecomp.
-
-```{r}
-#| label: tbl-weight-at-age
-#| tbl-cap: "Weight-at-age values used in the most recent model year."
-waa_tbl <- data_ebs |>
-  filter(type == "weight_at_age") |>
-  filter(timing == max(timing, na.rm = TRUE)) |>
-  select(age, value) |>
-  arrange(age)
-
-waa_tbl |>
-  gt_report() |>
-  tab_header(title = "Weight-at-Age (Most Recent Year)")
+  tab_header(title = "Run Status Comparison")
 ```
 
 ```{r}
-#| label: tbl-initial-naa
-#| tbl-cap: "Estimated initial numbers-at-age in thousands."
-naa_tbl <- est |>
-  filter(label == "numbers_at_age") |>
-  transmute(year = map_year(year_i), age = age_i, value = estimated) |>
-  arrange(year, age)
-
-initial_naa_tbl <- naa_tbl |>
-  filter(year == min(year, na.rm = TRUE))
-
-initial_naa_tbl |>
-  gt_report() |>
-  fmt_number(columns = value, decimals = 3) |>
-  tab_header(title = "Initial Numbers-at-Age (Thousands)")
+#| label: tbl-tvselex-gradient-diagnostics
+#| tbl-cap: "Largest absolute gradients from the TVselex TMB objective, matched back to the fixed-effect parameter table."
+if (!is.null(tvselex) && !is.null(tvselex$gradient_diagnostics)) {
+  tvselex$gradient_diagnostics |>
+    slice_max(abs_gradient, n = 15, with_ties = FALSE) |>
+    transmute(
+      parameter_index,
+      module = module_name,
+      fleet = dplyr::coalesce(fleet_name, ""),
+      label,
+      year = time,
+      estimate = estimated,
+      gradient,
+      abs_gradient
+    ) |>
+    gt_report() |>
+    fmt_number(columns = any_of(c("estimate", "gradient", "abs_gradient")), decimals = 3) |>
+    tab_header(title = "Largest TVselex Gradients")
+} else {
+  tibble::tibble(note = "Gradient diagnostics were not saved with the current TVselex output.") |>
+    gt_report() |>
+    tab_header(title = "Largest TVselex Gradients")
+}
 ```
 
 ```{r}
-#| label: tbl-terminal-naa
-#| tbl-cap: "Estimated terminal numbers-at-age in thousands."
-terminal_naa_tbl <- naa_tbl |>
-  filter(year == max(year, na.rm = TRUE))
+#| label: fig-tvselex-selectivity-over-time
+#| fig-cap: "Fishery selectivity-at-age over time from the TVselex run. The ascending inflection point varies annually; the remaining fishery double-logistic parameters are time-invariant."
+if (!is.null(tvselex) && identical(tvselex$status, "fit completed")) {
+  tv_sel_est <- tvselex$estimates |>
+    filter(module_name == "Selectivity", module_type == "DoubleLogistic")
 
-terminal_naa_tbl |>
-  gt_report() |>
-  fmt_number(columns = value, decimals = 3) |>
-  tab_header(title = "Terminal Numbers-at-Age (Thousands)")
-```
+  tv_inflection_asc <- tv_sel_est |>
+    filter(label == "inflection_point_asc", parameter_id >= 545) |>
+    arrange(parameter_id) |>
+    transmute(year = years[seq_len(n())], inflection_point_asc = estimated)
 
-```{r}
-#| label: tbl-maturity
-#| tbl-cap: "Maturity-at-age schedule used for presentation in the report."
-mat_tbl <- tibble::tibble(
-  age = ages,
-  value = c(
-    0, 0.008, 0.289, 0.641, 0.842,
-    0.901, 0.947, 0.963, 0.97, 1,
-    1, 1, 1, 1, 1
+  tv_fishery_static <- tv_sel_est |>
+    filter(parameter_id %in% c(546, 547, 548)) |>
+    select(label, estimated) |>
+    distinct() |>
+    tibble::deframe()
+
+  tvselex_selectivity <- tv_inflection_asc |>
+    tidyr::crossing(age = ages) |>
+    mutate(
+      selectivity = double_logistic(
+        age = age,
+        inflection_point_asc = inflection_point_asc,
+        slope_asc = tv_fishery_static[["slope_asc"]],
+        inflection_point_desc = tv_fishery_static[["inflection_point_desc"]],
+        slope_desc = tv_fishery_static[["slope_desc"]]
+      )
+    )
+
+  ggplot(tvselex_selectivity, aes(x = year, y = age, fill = selectivity)) +
+    geom_tile() +
+    scale_fill_viridis_c(limits = c(0, 1), name = "Selectivity") +
+    scale_y_continuous(breaks = ages) +
+    labs(
+      x = "Year",
+      y = "Age",
+      title = "TVselex Fishery Selectivity Over Time"
+    )
+} else {
+  plot.new()
+  text(
+    0.5, 0.5,
+    "TVselex fit output not available.\nRun scripts/05_fit_tvselex.R to populate this figure.",
+    cex = 1
   )
-) |>
-  arrange(age)
-
-mat_tbl |>
-  gt_report() |>
-  fmt_number(columns = value, decimals = 3) |>
-  tab_header(title = "Maturity-at-Age")
-```
-
-```{r}
-#| label: tbl-catch-at-age
-#| tbl-cap: "Estimated catch-at-age in the terminal year for the fishery."
-catch_tbl <- est |>
-  filter(label == "landings_numbers_at_age", fleet == "fishery") |>
-  mutate(year = map_year(year_i)) |>
-  filter(year == max(year, na.rm = TRUE)) |>
-  transmute(age = age_i, value = dplyr::coalesce(estimated, expected)) |>
-  arrange(age)
-
-catch_tbl |>
-  gt_report() |>
-  tab_header(title = "Catch-at-Age (Most Recent Year)")
-```
-
-```{r}
-#| label: tbl-survey-agecomp
-#| tbl-cap: "Observed survey age compositions in the most recent year with data."
-survey_agecomp <- data_ebs |>
-  filter(type == "age_comp", name %in% c("bts", "ats")) |>
-  filter(value != -999) |>
-  group_by(name) |>
-  filter(timing == max(timing, na.rm = TRUE)) |>
-  ungroup() |>
-  transmute(fleet = name, year = timing, age, proportion = value) |>
-  group_by(fleet, year) |>
-  mutate(proportion = proportion / sum(proportion, na.rm = TRUE)) |>
-  ungroup() |>
-  select(-year) |>
-  arrange(fleet, age)
-
-survey_agecomp |>
-  gt_report(groupname_col = "fleet") |>
-  tab_header(title = "Survey Proportions-at-Age (Most Recent Year)")
+}
 ```
 
 ## SparseNUTS Scaffold
@@ -998,15 +1025,213 @@ Rscript scripts/03_fit_sparse_nuts.R \
 
 By default this writes `outputs/sparsenuts_fit.rds`.
 
+# References
+
+Ianelli, J. N., Fissel, B., Holsman, K., Honkalehto, T., Kotwicki, S., Monnahan, C., Siddon, E., and Stienessen, S. 2024. *Assessment of the Walleye Pollock Stock in the Eastern Bering Sea*. North Pacific Fishery Management Council SAFE report. <https://files.npfmc.org/SAFE/2024/EBSpollock.pdf>.
+
+NOAA-FIMS. 2026. *Fisheries Integrated Modeling System (FIMS)*. Version `r fit$version`. GitHub organization and FIMS development repository. Accessed April 24, 2026. <https://github.com/NOAA-FIMS>.
+
+Monnahan, C. *SparseNUTS: Sparse No-U-Turn MCMC Sampling for Template Model Builder*. R package version `r if (requireNamespace("SparseNUTS", quietly = TRUE)) as.character(utils::packageVersion("SparseNUTS")) else "not installed"`. Accessed April 24, 2026. <https://noaa-afsc.github.io/SparseNUTS>.
+
+# Tables
+
+This section contains result tables. Input-only data tables are provided in the Appendix.
+
+```{r}
+#| label: tbl-recruitment-parameters
+#| tbl-cap: "Estimated recruitment parameters retained in the fitted model summary."
+param_tbl <- est |>
+  filter(label %in% c("log_rzero", "logit_steep")) |>
+  transmute(run = "run0", module_name, label, estimated) |>
+  distinct()
+
+if (!is.null(tvselex) && identical(tvselex$status, "fit completed")) {
+  param_tbl <- bind_rows(
+    param_tbl,
+    tvselex$estimates |>
+      filter(label %in% c("log_rzero", "logit_steep")) |>
+      transmute(run = "TVselex", module_name, label, estimated) |>
+      distinct()
+  )
+}
+
+param_tbl |>
+  tidyr::pivot_wider(names_from = run, values_from = estimated) |>
+  gt_report() |>
+  fmt_number(columns = any_of(c("run0", "TVselex")), decimals = 3) |>
+  tab_header(title = "Key Recruitment Parameters")
+```
+
+```{r}
+#| label: tbl-q
+#| tbl-cap: "Estimated survey catchability coefficients."
+fleet_module_map <- tibble::tibble(
+  module_id = 1:5,
+  fleet = c("ats", "avo", "bts", "cpue", "fishery")
+)
+
+q_tbl <- est |>
+  filter(label == "log_q") |>
+  mutate(q = exp(estimated)) |>
+  transmute(run = "run0", module_id, q)
+
+if (!is.null(tvselex) && identical(tvselex$status, "fit completed")) {
+  q_tbl <- bind_rows(
+    q_tbl,
+    tvselex$estimates |>
+      filter(label == "log_q") |>
+      mutate(q = exp(estimated)) |>
+      transmute(run = "TVselex", module_id, q)
+  )
+}
+
+q_tbl |>
+  left_join(fleet_module_map, by = "module_id") |>
+  select(module_id, fleet, run, q) |>
+  tidyr::pivot_wider(names_from = run, values_from = q) |>
+  arrange(module_id) |>
+  gt_report() |>
+  fmt_number(columns = any_of(c("run0", "TVselex")), decimals = 3) |>
+  tab_header(title = "Survey Catchability (q)")
+```
+
+```{r}
+#| label: tbl-naa-comparison
+#| tbl-cap: "Initial and terminal estimated numbers-at-age by model run."
+make_naa_table <- function(estimates, run_name) {
+  estimates |>
+    filter(label == "numbers_at_age") |>
+    transmute(
+      year = map_year(year_i),
+      age = age_i,
+      run = run_name,
+      value = estimated
+    ) |>
+    group_by(run) |>
+    filter(year %in% range(year, na.rm = TRUE)) |>
+    ungroup() |>
+    mutate(period = ifelse(year == min(year, na.rm = TRUE), "initial", "terminal")) |>
+    select(period, age, run, value)
+}
+
+naa_comparison <- make_naa_table(est, "run0")
+
+if (!is.null(tvselex) && identical(tvselex$status, "fit completed")) {
+  naa_comparison <- bind_rows(
+    naa_comparison,
+    make_naa_table(tvselex$estimates, "TVselex")
+  )
+}
+
+naa_comparison |>
+  tidyr::pivot_wider(names_from = run, values_from = value) |>
+  arrange(factor(period, levels = c("initial", "terminal")), age) |>
+  gt_report() |>
+  fmt_number(columns = any_of(c("run0", "TVselex")), decimals = 3) |>
+  tab_header(title = "Initial and Terminal Numbers-at-Age")
+```
+
+```{r}
+#| label: tbl-catch-at-age
+#| tbl-cap: "Estimated terminal-year fishery catch-at-age by model run."
+make_catch_table <- function(estimates, run_name) {
+  estimates |>
+    filter(label == "landings_numbers_at_age") |>
+    mutate(year = map_year(year_i)) |>
+    filter(year == max(year, na.rm = TRUE)) |>
+    transmute(
+      age = age_i,
+      run = run_name,
+      value = dplyr::coalesce(estimated, expected)
+    ) |>
+    group_by(age, run) |>
+    summarize(value = sum(value, na.rm = TRUE), .groups = "drop")
+}
+
+catch_comparison <- make_catch_table(est, "run0")
+
+if (!is.null(tvselex) && identical(tvselex$status, "fit completed")) {
+  catch_comparison <- bind_rows(
+    catch_comparison,
+    make_catch_table(tvselex$estimates, "TVselex")
+  )
+}
+
+catch_comparison |>
+  tidyr::pivot_wider(names_from = run, values_from = value) |>
+  arrange(age) |>
+  gt_report() |>
+  fmt_number(columns = any_of(c("run0", "TVselex")), decimals = 3) |>
+  tab_header(title = "Terminal-Year Fishery Catch-at-Age")
+```
+
 # Appendix
+
+## Data Tables
+
+Supporting input data tables are provided in @tbl-weight-at-age, @tbl-maturity, and @tbl-survey-agecomp. Result tables are reported in the main Tables section.
+
+```{r}
+#| label: tbl-weight-at-age
+#| tbl-cap: "Input weight-at-age values used in the most recent model year."
+waa_tbl <- data_ebs |>
+  filter(type == "weight_at_age") |>
+  filter(timing == max(timing, na.rm = TRUE)) |>
+  select(age, value) |>
+  arrange(age)
+
+waa_tbl |>
+  gt_report() |>
+  tab_header(title = "Weight-at-Age Input (Most Recent Year)")
+```
+
+```{r}
+#| label: tbl-maturity
+#| tbl-cap: "Input maturity-at-age schedule used in the model."
+mat_tbl <- tibble::tibble(
+  age = ages,
+  value = c(
+    0, 0.008, 0.289, 0.641, 0.842,
+    0.901, 0.947, 0.963, 0.97, 1,
+    1, 1, 1, 1, 1
+  )
+) |>
+  arrange(age)
+
+mat_tbl |>
+  gt_report() |>
+  fmt_number(columns = value, decimals = 3) |>
+  tab_header(title = "Maturity-at-Age Input")
+```
+
+```{r}
+#| label: tbl-survey-agecomp
+#| tbl-cap: "Observed survey age-composition input proportions in the most recent year with data."
+survey_agecomp <- data_ebs |>
+  filter(type == "age_comp", name %in% c("bts", "ats")) |>
+  filter(value != -999) |>
+  group_by(name) |>
+  filter(timing == max(timing, na.rm = TRUE)) |>
+  ungroup() |>
+  transmute(fleet = name, year = timing, age, proportion = value) |>
+  group_by(fleet, year) |>
+  mutate(proportion = proportion / sum(proportion, na.rm = TRUE)) |>
+  ungroup() |>
+  select(-year) |>
+  arrange(fleet, age)
+
+survey_agecomp |>
+  gt_report(groupname_col = "fleet") |>
+  tab_header(title = "Survey Age-Composition Inputs (Most Recent Year)")
+```
 
 ## Parameter Estimates
 
-The full parameter listing is shown in @tbl-parameter-appendix. Standard deviations are reported when they are available in the fitted summary object; blank entries indicate that uncertainty output was not available for that parameter in the current saved fit.
+The full `run0` parameter listing is shown in @tbl-parameter-appendix. Standard deviations are reported when they are available in the fitted summary object; blank entries indicate that uncertainty output was not available for that parameter in the current saved fit.
 
 ```{r}
 #| label: tbl-parameter-appendix
-#| tbl-cap: "Appendix table of fitted parameter estimates and standard deviations, where available."
+#| tbl-cap: "Appendix table of fitted run0 parameter estimates and standard deviations, where available."
 parameter_appendix <- est |>
   filter(estimation_type %in% c("fixed_effects", "random_effects")) |>
   distinct(
@@ -1044,19 +1269,11 @@ parameter_appendix <- est |>
 parameter_appendix |>
   gt_report() |>
   fmt_number(columns = any_of(c("estimate", "sd")), decimals = 3) |>
-  tab_header(title = "Appendix: Parameter Estimates")
+  tab_header(title = "Appendix: run0 Parameter Estimates")
 ```
-
-# References
-
-Ianelli, J. N., Fissel, B., Holsman, K., Honkalehto, T., Kotwicki, S., Monnahan, C., Siddon, E., and Stienessen, S. 2024. *Assessment of the Walleye Pollock Stock in the Eastern Bering Sea*. North Pacific Fishery Management Council SAFE report. <https://files.npfmc.org/SAFE/2024/EBSpollock.pdf>.
-
-NOAA-FIMS. 2026. *Fisheries Integrated Modeling System (FIMS)*. Version `r fit$version`. GitHub organization and FIMS development repository. Accessed April 24, 2026. <https://github.com/NOAA-FIMS>.
-
-Monnahan, C. *SparseNUTS: Sparse No-U-Turn MCMC Sampling for Template Model Builder*. R package version `r if (requireNamespace("SparseNUTS", quietly = TRUE)) as.character(utils::packageVersion("SparseNUTS")) else "not installed"`. Accessed April 24, 2026. <https://noaa-afsc.github.io/SparseNUTS>.
 
 # Notes
 
-- AVO selectivity sharing (`selectivity_shared_with = "ats"`) is not recognized by FIMS ≥ 0.9.0; AVO selectivity is currently estimated independently.
+- AVO selectivity is fixed independently with ascending inflection point 1.5, ascending slope 2.0, descending inflection point 8.0, and descending slope 0.1.
 - ATS weight-at-age is used as the growth input.
 - Composition likelihoods use a multinomial distribution with sample sizes taken from the 2024 EBS pollock assessment inputs.
