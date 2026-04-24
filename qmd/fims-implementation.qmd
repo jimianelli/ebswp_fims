@@ -131,10 +131,21 @@ availability |>
 - **Growth**: empirical WAA from stock-level SSB weights
 - **Maturity**: logistic
 
-The parameter specifications are adjusted from the FIMS defaults before fitting as follows.
+## Run Definitions
+
+Two model runs are defined in this implementation:
+
+| Run | Description | Selectivity treatment |
+|---|---|---|
+| `run0` | Initial FIMS run used for the current fitted results. | Fishery and BTS use time-invariant logistic selectivity; ATS and AVO use time-invariant double-logistic selectivity. |
+| `TVselex` | Time-varying fishery selectivity run. | Fishery selectivity is changed to a double-logistic form and only the ascending inflection point is expanded over model years. |
+
+The requested `TVselex` run is specified with the FIMS `DoubleLogisticSelectivity` module because the installed FIMS version used here (`r as.character(utils::packageVersion("FIMS"))`) exposes logistic and double-logistic selectivity classes, but not a double-normal selectivity class.
+
+The `run0` parameter specifications are adjusted from the FIMS defaults before fitting as follows.
 
 ```{r}
-#| label: lst-parameter-specifications
+#| label: lst-run0-parameter-specifications
 #| eval: false
 #| echo: true
 #| code-fold: false
@@ -168,6 +179,67 @@ pars <- create_default_parameters(cfg, data_4_model) |>
       TRUE ~ NA_character_
     )
   )
+```
+
+The `TVselex` run starts from the same data and recruitment settings, but changes fishery selectivity to `DoubleLogistic` and makes only the ascending inflection point parameter time-varying by creating one row for that parameter in each model year. The remaining fishery double-logistic parameters are retained as time-invariant fixed effects.
+
+```{r}
+#| label: lst-tvselex-parameter-specifications
+#| eval: false
+#| echo: true
+#| code-fold: false
+cfg_tvselex <- create_default_configurations(data_4_model) |>
+  tidyr::unnest(cols = data) |>
+  dplyr::rows_update(
+    tibble::tibble(
+      module_name = "Selectivity",
+      fleet_name = c("fishery", "bts", "ats", "avo"),
+      module_type = c("DoubleLogistic", "Logistic", "DoubleLogistic", "DoubleLogistic")
+    ),
+    by = c("module_name", "fleet_name")
+  ) |>
+  tidyr::nest(.by = c(model_family, module_name, fleet_name))
+
+pars_tvselex_base <- create_default_parameters(cfg_tvselex, data_4_model) |>
+  tidyr::unnest(cols = data) |>
+  dplyr::rows_update(
+    tibble::tibble(
+      module_name = "Recruitment",
+      label = "log_devs",
+      time = (get_start_year(data_4_model) + 1):get_end_year(data_4_model),
+      estimation_type = "fixed_effects"
+    ),
+    by = c("module_name", "label", "time")
+  )
+
+fishery_tvselex <- pars_tvselex_base |>
+  dplyr::filter(
+    module_name == "Selectivity",
+    fleet_name == "fishery",
+    label == "inflection_point_asc"
+  ) |>
+  dplyr::select(-time) |>
+  tidyr::crossing(time = years) |>
+  dplyr::mutate(estimation_type = "fixed_effects")
+
+pars_tvselex <- pars_tvselex_base |>
+  dplyr::filter(
+    !(
+      module_name == "Selectivity" &
+        fleet_name == "fishery" &
+        label == "inflection_point_asc"
+    )
+  ) |>
+  dplyr::bind_rows(fishery_tvselex) |>
+  dplyr::mutate(
+    selectivity_shared_with = dplyr::case_when(
+      module_name == "Selectivity" & fleet_name == "cpue" ~ "fishery",
+      module_name == "Selectivity" & fleet_name == "avo" ~ "ats",
+      TRUE ~ NA_character_
+    )
+  )
+
+input_tvselex <- initialize_fims(pars_tvselex, data_4_model)
 ```
 
 ## Equations
@@ -226,9 +298,9 @@ $$
 
 where \(y_t\) and \(\hat{y}_t\) are observed and expected landings or index, \(\sigma_t\) is the lognormal SD, \(n_{a,t}\) are age-composition counts (or effective sample sizes), and \(p_{a,t}\) are predicted age proportions.
 
-# Fit Results
+# Fit Results: `run0`
 
-The fitted spawning biomass trajectory is shown in @fig-ssb. Fishery observed and predicted landings are compared in @fig-landings-fit, while survey and CPUE index fits are summarized in @fig-fits-by-fleet and residual patterns are shown in @fig-residuals. These index series are shown on their native arithmetic scales with separate facet scales because the magnitudes differ across surveys and CPUE, and the residuals are standardized by the input observation standard deviations on the arithmetic scale. Expected age-composition outputs for fishery, BTS, and ATS are shown in @fig-agecomp-fishery, @fig-agecomp-bts, and @fig-agecomp-ats, respectively, while selectivity is shown in @fig-selectivity-curves. The time-invariant selectivity assumptions used to initialize each gear are shown for selected years in @fig-selectivity-assumptions. A diagnostics overview, including model status and the fitted SSB and recruitment trajectories, is shown in @tbl-model-status and @fig-ssb-recruitment. Likelihood diagnostics and key parameter summaries are reported in @tbl-diagnostics, @tbl-recruitment-parameters, and @tbl-q.
+The current fitted results are for `run0`. The fitted spawning biomass trajectory is shown in @fig-ssb. Fishery observed and predicted landings are compared in @fig-landings-fit, while survey and CPUE index fits are summarized in @fig-fits-by-fleet and residual patterns are shown in @fig-residuals. These index series are shown on their native arithmetic scales with separate facet scales because the magnitudes differ across surveys and CPUE, and the residuals are standardized by the input observation standard deviations on the arithmetic scale. Expected age-composition outputs for fishery, BTS, and ATS are shown in @fig-agecomp-fishery, @fig-agecomp-bts, and @fig-agecomp-ats, respectively, while selectivity is shown in @fig-selectivity-curves. The time-invariant selectivity assumptions used to initialize each gear are shown for selected years in @fig-selectivity-assumptions. A diagnostics overview, including model status and the fitted SSB and recruitment trajectories, is shown in @tbl-model-status and @fig-ssb-recruitment. Likelihood diagnostics and key parameter summaries are reported in @tbl-diagnostics, @tbl-recruitment-parameters, and @tbl-q.
 
 ```{r load-fit}
 if (!exists("doc_dir")) {
@@ -725,6 +797,79 @@ q_tbl <- est |>
 q_tbl |>
   gt_report() |>
   tab_header(title = "Survey Catchability (q)")
+```
+
+# Fit Results: `TVselex`
+
+```{r}
+#| label: tvselex-status-data
+#| include: false
+tvselex_path <- file.path(project_root, "outputs", "tvselex_fit_summary.rds")
+tvselex <- if (file.exists(tvselex_path)) readRDS(tvselex_path) else NULL
+
+tvselex_status <- if (is.null(tvselex)) {
+  tibble::tibble(
+    metric = c("Run status", "Interpretation"),
+    value = c(
+      "not yet run",
+      "No saved TVselex output was found; run scripts/05_fit_tvselex.R to attempt this model."
+    )
+  )
+} else {
+  tibble::tibble(
+    metric = c(
+      "Run status",
+      "FIMS version",
+      "Fixed effects",
+      "Random effects",
+      "Time-varying fishery selectivity rows",
+      "Max gradient",
+      "Total NLL",
+      "Terminal SB",
+      "Interpretation"
+    ),
+    value = c(
+      tvselex$status,
+      as.character(tvselex$version),
+      as.character(tvselex$number_of_parameters[["fixed_effects"]]),
+      as.character(tvselex$number_of_parameters[["random_effects"]]),
+      as.character(tvselex$fishery_selectivity_rows),
+      ifelse(is.null(tvselex$max_gradient), "", sprintf("%.5f", tvselex$max_gradient)),
+      ifelse(is.null(tvselex$report$jnll), "", sprintf("%.2f", tvselex$report$jnll)),
+      ifelse(
+        is.null(tvselex$report$spawning_biomass),
+        "",
+        sprintf("%.2f", tail(tvselex$report$spawning_biomass[[1]], 1))
+      ),
+      if (identical(tvselex$status, "fit completed")) {
+        if (is.finite(tvselex$max_gradient) && tvselex$max_gradient <= 0.01) {
+          "TVselex completed and appears well converged by gradient threshold."
+        } else {
+          "TVselex completed, but the maximum gradient is too high for the run to be treated as a reliable comparison model."
+        }
+      } else {
+        "TVselex did not produce an accepted FIMS output object; do not compare fitted trajectories or likelihood components from this attempt."
+      }
+    )
+  )
+}
+
+tvselex_fixed_effects <- tvselex_status$value[tvselex_status$metric == "Fixed effects"]
+if (length(tvselex_fixed_effects) == 0) tvselex_fixed_effects <- "not available"
+tvselex_fishery_rows <- tvselex_status$value[tvselex_status$metric == "Time-varying fishery selectivity rows"]
+if (length(tvselex_fishery_rows) == 0) tvselex_fishery_rows <- "not available"
+```
+
+The `TVselex` run was attempted as a time-varying fishery selectivity alternative to `run0`. This model increases flexibility by estimating the fishery double-logistic ascending inflection point by year, while retaining time-invariant values for the other fishery selectivity parameters. In the current attempt, this expanded the model to `r tvselex_fixed_effects` fixed effects, including `r tvselex_fishery_rows` time-varying fishery selectivity rows.
+
+The reduced `TVselex` formulation completed, but the maximum gradient remains large, so these results should be treated as a diagnostic attempt rather than an accepted comparison model. The fit produced a total NLL of `r tvselex_status$value[tvselex_status$metric == "Total NLL"]` and terminal spawning biomass of `r tvselex_status$value[tvselex_status$metric == "Terminal SB"]`, but these quantities should not be interpreted until the convergence problem is resolved. The next iteration should add structure to the annual ascending-inflection estimates, such as time blocks, smoothing, bounds, or penalties.
+
+```{r}
+#| label: tbl-tvselex-status
+#| tbl-cap: "Status summary for the attempted TVselex model run."
+tvselex_status |>
+  gt_report() |>
+  tab_header(title = "TVselex Run Status")
 ```
 
 # Data Tables

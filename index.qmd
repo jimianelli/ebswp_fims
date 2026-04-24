@@ -19,6 +19,7 @@ FIMS configuration in this repository.
 | `scripts/02_fit_model.R` | Builds the FIMS model inputs, fits the maximum-likelihood model, extracts estimates and reports, and saves a compact fit summary. | `outputs/fims_fit_summary.rds` |
 | `scripts/03_fit_sparse_nuts.R` | Command-line scaffold for fitting the FIMS mode and then running `SparseNUTS` on the TMB objective. | `outputs/sparsenuts_fit.rds` |
 | `scripts/04_run_retro_5_peel.R` | Runs 0- through 5-year retrospective peels and summarizes SSB and recruitment trajectories. | `outputs/retro_5_peel_summary.rds` |
+| `scripts/05_fit_tvselex.R` | Attempts the `TVselex` model with a time-varying fishery double-logistic ascending inflection point and saves either a fit summary or failure diagnostics. | `outputs/tvselex_fit_summary.rds` |
 | `scripts/sparsenuts_framework.R` | Shared helper functions for resolving paths, building FIMS inputs, fitting the mode, preparing retrospective peels, and saving `SparseNUTS` output. | Used by fitting, MCMC, and retrospective scripts |
 | `fimsfit.R` | Local FIMS fitting wrapper and `FIMSFit` S4 class utilities used by the application scripts. | Fitted `FIMSFit` objects and accessor outputs |
 
