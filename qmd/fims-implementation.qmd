@@ -51,6 +51,14 @@ gt_report <- function(data, ...) {
 
 This document summarizes a simplified FIMS implementation for EBS pollock based on inputs from the main 2024 EBS pollock stock assessment ([NPFMC SAFE 2024 EBS pollock assessment](https://files.npfmc.org/SAFE/2024/EBSpollock.pdf)). The model is a single-population catch-at-age assessment with one fishery fleet and four index series (BTS, ATS, AVO, and CPUE). Length compositions and seasonal timing are omitted.
 
+The current FIMS configuration should be interpreted as a reduced implementation of the 2024 assessment rather than a one-for-one reproduction. Several assessment features are simplified or not yet represented here:
+
+- In the 2024 assessment, age-1 observations from the acoustic-trawl survey and bottom trawl survey are treated as separate age-1 abundance indices, while the remaining ages are aggregated into biomass indices for those surveys. The FIMS implementation currently uses the survey biomass index series directly and handles age information through age-composition observations, rather than splitting age-1 survey signals into separate index fleets.
+- The 2024 assessment links AVO selectivity to the ATS selectivity pattern. In this FIMS implementation, AVO is represented with fixed double-logistic selectivity parameters rather than sharing the estimated ATS selectivity curve.
+- The 2024 assessment allows time variation in the BTS selectivity inflection point for ages 2 and older. The baseline FIMS run uses time-invariant logistic BTS selectivity.
+- The 2024 assessment fishery selectivity is represented with non-parametric coefficients and regularity penalties. The baseline FIMS run uses a parametric logistic fishery selectivity curve, while the `TVselex` exploratory run uses a double-logistic fishery curve with annual variation only in the ascending inflection point.
+- Other apparent simplifications include omitting length-composition data, omitting seasonal/subannual timing structure, using empirical stock-level weight-at-age inputs, and keeping recruitment variance treatment simpler than the production assessment configuration.
+
 # Data Inputs
 
 The index series include ATS (Acoustic-trawl survey), BTS (Bottom trawl survey), CPUE (catch per unit effort), and AVO (Acoustic Vessels of Opportunity; opportunistic backscatter data collection and processing).
@@ -972,7 +980,7 @@ model_status_tbl |>
 
 ```{r}
 #| label: fig-ssb-recruitment
-#| fig-cap: "Fitted spawning biomass and expected recruitment trajectories from run0 and TVselex."
+#| fig-cap: "Fitted spawning biomass and expected recruitment trajectories from run0 and TVselex, with available ADMB 2024, SS3 base, and SAM poll24 derived outputs overlaid on comparable plotting scales. SAM SSB and age-1 recruitment are converted from kg/fish to thousands of tonnes and millions of fish, respectively."
 make_diag_series <- function(estimates, model_name) {
   recruitment_values <- estimates |>
     filter(label == "expected_recruitment") |>
@@ -994,6 +1002,42 @@ if (!is.null(tvselex) && identical(tvselex$status, "fit completed")) {
     diag_series,
     make_diag_series(tvselex$estimates, "TVselex")
   )
+}
+
+derived_dir <- file.path(dirname(project_root), "results", "derived")
+
+read_derived_diag_series <- function(file_name, model_name) {
+  path <- file.path(derived_dir, file_name)
+  if (!file.exists(path)) return(NULL)
+
+  derived <- readRDS(path)
+  if (is.null(derived$timeseries)) return(NULL)
+
+  derived$timeseries |>
+    filter(quantity %in% c("SSB", "Recruit", "Recruit_age1")) |>
+    transmute(
+      model = model_name,
+      year = as.integer(year),
+      value = dplyr::case_when(
+        model_name == "SAM poll24" & quantity == "SSB" ~ value / 1e6,
+        model_name == "SAM poll24" & quantity == "Recruit_age1" ~ value / 1e6,
+        TRUE ~ value
+      ),
+      quantity = dplyr::case_when(
+        quantity %in% c("Recruit", "Recruit_age1") ~ "Recruitment",
+        TRUE ~ quantity
+      )
+    )
+}
+
+derived_diag_series <- bind_rows(
+  read_derived_diag_series("admb_2024.rds", "ADMB 2024"),
+  read_derived_diag_series("ss3_base.rds", "SS3 base"),
+  read_derived_diag_series("sam_poll24.rds", "SAM poll24")
+)
+
+if (nrow(derived_diag_series) > 0) {
+  diag_series <- bind_rows(diag_series, derived_diag_series)
 }
 
 ggplot(diag_series, aes(x = year, y = value, color = model)) +
