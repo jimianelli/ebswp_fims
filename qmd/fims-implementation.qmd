@@ -67,6 +67,7 @@ The index series include ATS (Acoustic-trawl survey), BTS (Bottom trawl survey),
 doc_dir <- tryCatch(dirname(knitr::current_input()), error = function(e) NA_character_)
 if (is.na(doc_dir) || doc_dir == ".") doc_dir <- getwd()
 project_root <- if (file.exists(file.path(doc_dir, "data"))) doc_dir else file.path(doc_dir, "..")
+project_root <- normalizePath(project_root, mustWork = FALSE)
 input_path <- file.path(project_root, "data", "ebs_fims_data.rds")
 if (!file.exists(input_path)) {
   stop(
@@ -980,17 +981,17 @@ model_status_tbl |>
 
 ```{r}
 #| label: fig-ssb-recruitment
-#| fig-cap: "Fitted spawning biomass and expected recruitment trajectories from run0 and TVselex, with available ADMB 2024, SS3 base, and SAM poll24 derived outputs overlaid on comparable plotting scales. SAM SSB and age-1 recruitment are converted from kg/fish to thousands of tonnes and millions of fish, respectively."
+#| fig-cap: "Fitted spawning biomass and expected recruitment trajectories from run0 and TVselex, with the ADMB 2024 derived output overlaid for comparison."
 make_diag_series <- function(estimates, model_name) {
   recruitment_values <- estimates |>
     filter(label == "expected_recruitment") |>
     mutate(year = map_year(year_i)) |>
-    transmute(model = model_name, year, value = estimated, quantity = "Recruitment")
+    transmute(model = model_name, source = "FIMS", year, value = estimated, quantity = "Recruitment")
 
   ssb_values <- estimates |>
     filter(label == "spawning_biomass") |>
     mutate(year = map_year(year_i)) |>
-    transmute(model = model_name, year, value = estimated, quantity = "SSB")
+    transmute(model = model_name, source = "FIMS", year, value = estimated, quantity = "SSB")
 
   bind_rows(ssb_values, recruitment_values)
 }
@@ -1017,12 +1018,9 @@ read_derived_diag_series <- function(file_name, model_name) {
     filter(quantity %in% c("SSB", "Recruit", "Recruit_age1")) |>
     transmute(
       model = model_name,
+      source = "ADMB 2024",
       year = as.integer(year),
-      value = dplyr::case_when(
-        model_name == "SAM poll24" & quantity == "SSB" ~ value / 1e6,
-        model_name == "SAM poll24" & quantity == "Recruit_age1" ~ value / 1e6,
-        TRUE ~ value
-      ),
+      value = value,
       quantity = dplyr::case_when(
         quantity %in% c("Recruit", "Recruit_age1") ~ "Recruitment",
         TRUE ~ quantity
@@ -1031,18 +1029,25 @@ read_derived_diag_series <- function(file_name, model_name) {
 }
 
 derived_diag_series <- bind_rows(
-  read_derived_diag_series("admb_2024.rds", "ADMB 2024"),
-  read_derived_diag_series("ss3_base.rds", "SS3 base"),
-  read_derived_diag_series("sam_poll24.rds", "SAM poll24")
+  read_derived_diag_series("admb_2024.rds", "ADMB 2024")
 )
 
 if (nrow(derived_diag_series) > 0) {
   diag_series <- bind_rows(diag_series, derived_diag_series)
 }
 
-ggplot(diag_series, aes(x = year, y = value, color = model)) +
-  geom_line(linewidth = 0.8) +
+model_colors <- c(
+  "run0" = "#1b9e77",
+  "TVselex" = "#d95f02",
+  "ADMB 2024" = "#1f78b4"
+)
+
+ggplot(diag_series, aes(x = year, y = value, color = model, group = model)) +
+  geom_line(data = filter(diag_series, source == "FIMS"), linewidth = 0.9) +
+  geom_line(data = filter(diag_series, source == "ADMB 2024"), linewidth = 0.9, linetype = "22") +
+  geom_point(data = filter(diag_series, source == "ADMB 2024"), size = 0.75, alpha = 0.65) +
   facet_wrap(~quantity, scales = "free_y", ncol = 1) +
+  scale_color_manual(values = model_colors) +
   scale_y_continuous(limits = c(0, NA)) +
   labs(
     x = "Year",
