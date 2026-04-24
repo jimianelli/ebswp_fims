@@ -230,7 +230,7 @@ methods::setMethod(
     # Extract the model_output, which contains the JSON-like structure.
     model_output <- get_model_output(x)
     # Reshape the output from the JSON structure into a data frame.
-    json_output <- reshape_json_estimates(model_output)
+    json_output <- FIMS:::reshape_json_estimates(model_output)
 
     # Join the two outputs on parameter_id to compare and consolidate information.
     estimates <- dplyr::left_join(
@@ -239,12 +239,24 @@ methods::setMethod(
         dplyr::filter(!is.na(parameter_id)) |>
         dplyr::select(-initial, -module_name, -module_id, -estimate, -label),
       by = c("parameter_id")
-    ) |>
-      dplyr::mutate(
-        uncertainty = dplyr::coalesce(uncertainty.x, uncertainty.y),
-        .after = "estimation_type"
-      ) |>
-      dplyr::select(-uncertainty.x, -uncertainty.y)
+    )
+
+    if (all(c("uncertainty.x", "uncertainty.y") %in% names(estimates))) {
+      estimates <- estimates |>
+        dplyr::mutate(
+          uncertainty = dplyr::coalesce(uncertainty.x, uncertainty.y),
+          .after = "estimation_type"
+        ) |>
+        dplyr::select(-uncertainty.x, -uncertainty.y)
+    } else if ("uncertainty.x" %in% names(estimates)) {
+      estimates <- estimates |>
+        dplyr::rename(uncertainty = uncertainty.x)
+    } else if ("uncertainty.y" %in% names(estimates)) {
+      estimates <- estimates |>
+        dplyr::rename(uncertainty = uncertainty.y)
+    }
+
+    estimates
   }
 )
 
@@ -446,7 +458,7 @@ FIMSFit <- function(
   # Reshape the TMB estimates
   # If the model is not optimized, opt is an empty list and is not used in
   # reshape_tmb_estimates().
-  tmb_estimates <- reshape_tmb_estimates(
+  tmb_estimates <- FIMS:::reshape_tmb_estimates(
     obj = obj,
     sdreport = sdreport,
     opt = opt,
@@ -460,14 +472,14 @@ FIMSFit <- function(
     input[["model"]]$get_output(do_sd_report = isTRUE(get_sd) && length(opt) > 0),
     error = function(e) {
       cli::cli_warn(c(
-        "!" = "get_output failed with sdreport enabled; retrying without sdreport.",
+        "!" = "get_output failed with explicit sdreport control; retrying with default signature.",
         "i" = "{conditionMessage(e)}"
       ))
-      input[["model"]]$get_output(do_sd_report = FALSE)
+      input[["model"]]$get_output()
     }
   )
   # Reshape the JSON estimates
-  json_estimates <- reshape_json_estimates(model_output)
+  json_estimates <- FIMS:::reshape_json_estimates(model_output)
   # Merge json_estimates into tmb_estimates based on parameter id
   # TODO: Need uncertainty from TMB for derived quantities
   # TODO: change order of columns
@@ -477,12 +489,22 @@ FIMSFit <- function(
       dplyr::filter(!is.na(parameter_id)) |>
       dplyr::select(-initial, -module_name, -module_id, -estimate, -label),
     by = c("parameter_id")
-  ) |>
-    dplyr::mutate(
-      uncertainty = dplyr::coalesce(uncertainty.x, uncertainty.y),
-      .after = "estimation_type"
-    ) |>
-    dplyr::select(-uncertainty.x, -uncertainty.y)
+  )
+
+  if (all(c("uncertainty.x", "uncertainty.y") %in% names(estimates))) {
+    estimates <- estimates |>
+      dplyr::mutate(
+        uncertainty = dplyr::coalesce(uncertainty.x, uncertainty.y),
+        .after = "estimation_type"
+      ) |>
+      dplyr::select(-uncertainty.x, -uncertainty.y)
+  } else if ("uncertainty.x" %in% names(estimates)) {
+    estimates <- estimates |>
+      dplyr::rename(uncertainty = uncertainty.x)
+  } else if ("uncertainty.y" %in% names(estimates)) {
+    estimates <- estimates |>
+      dplyr::rename(uncertainty = uncertainty.y)
+  }
 
   fit <- methods::new(
     "FIMSFit",

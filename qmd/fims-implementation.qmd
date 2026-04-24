@@ -34,6 +34,8 @@ This document summarizes a simplified FIMS implementation for EBS pollock based 
 
 # Data Inputs
 
+The index series include ATS (Acoustic-trawl survey), BTS (Bottom trawl survey), CPUE (catch per unit effort), and AVO (Acoustic Vessels of Opportunity; opportunistic backscatter data collection and processing).
+
 ```{r load-data}
 doc_dir <- tryCatch(dirname(knitr::current_input()), error = function(e) NA_character_)
 if (is.na(doc_dir) || doc_dir == ".") doc_dir <- getwd()
@@ -105,7 +107,7 @@ availability |>
 - **Population**: single stock
 - **Fleets**: fishery, BTS, ATS, AVO, CPUE
 - **Recruitment**: Beverton–Holt with fixed-effect deviations
-- **Selectivity**: Double logistic for all fleets
+- **Selectivity**: asymptotic logistic for fishery and BTS; double logistic for ATS and AVO
 - **Selectivity sharing**: AVO shares ATS selectivity
 - **Growth**: empirical WAA from stock-level SSB weights
 - **Maturity**: logistic
@@ -168,7 +170,7 @@ where \(y_t\) and \(\hat{y}_t\) are observed and expected landings or index, \(\
 
 # Fit Results
 
-The fitted spawning biomass trajectory is shown in @fig-ssb. Fishery observed and predicted landings are compared in @fig-landings-fit, while survey and CPUE index fits are summarized in @fig-fits-by-fleet and residual patterns are shown in @fig-residuals. Expected age-composition outputs for fishery, BTS, and ATS are shown in @fig-agecomp-fishery, @fig-agecomp-bts, and @fig-agecomp-ats, respectively, while selectivity is shown in @fig-selectivity-curves. The time-invariant selectivity assumptions used to initialize each gear are shown for selected years in @fig-selectivity-assumptions. Likelihood diagnostics and key parameter summaries are reported in @tbl-diagnostics, @tbl-recruitment-parameters, and @tbl-q.
+The fitted spawning biomass trajectory is shown in @fig-ssb. Fishery observed and predicted landings are compared in @fig-landings-fit, while survey and CPUE index fits are summarized in @fig-fits-by-fleet and residual patterns are shown in @fig-residuals. These index series are shown on their native arithmetic scales with separate facet scales because the magnitudes differ across surveys and CPUE. Expected age-composition outputs for fishery, BTS, and ATS are shown in @fig-agecomp-fishery, @fig-agecomp-bts, and @fig-agecomp-ats, respectively, while selectivity is shown in @fig-selectivity-curves. The time-invariant selectivity assumptions used to initialize each gear are shown for selected years in @fig-selectivity-assumptions. A diagnostics overview, including model status and the fitted SSB and recruitment trajectories, is shown in @tbl-model-status and @fig-ssb-recruitment. Likelihood diagnostics and key parameter summaries are reported in @tbl-diagnostics, @tbl-recruitment-parameters, and @tbl-q.
 
 ```{r load-fit}
 if (!exists("doc_dir")) {
@@ -239,7 +241,7 @@ ggplot(land, aes(x = year)) +
 
 ```{r}
 #| label: fig-fits-by-fleet
-#| fig-cap: "Observed and predicted index series for BTS, ATS, AVO, and CPUE."
+#| fig-cap: "Observed and predicted index series for BTS, ATS, AVO, and CPUE shown on arithmetic scales with separate facet axes."
 obs_index <- data_ebs |>
   filter(type == "index", value != -999) |>
   transmute(series = toupper(name), year = timing, observed = value)
@@ -267,7 +269,7 @@ score_map <- function(pred_tbl, obs_tbl) {
         filter(series_id == perm[j]) |>
         select(year, predicted)
       joined <- left_join(obs_j, pred_j, by = "year")
-      total_score <- total_score + sqrt(mean((log(joined$observed) - log(joined$predicted))^2, na.rm = TRUE))
+      total_score <- total_score + sqrt(mean((joined$observed - joined$predicted)^2, na.rm = TRUE))
     }
     tibble::tibble(row_id = i, total_score = total_score)
   })
@@ -288,29 +290,29 @@ ggplot(fits, aes(x = year)) +
   geom_point(aes(y = observed), color = "#377eb8", size = 1.1, alpha = 0.7, na.rm = TRUE) +
   facet_wrap(~series, scales = "free_y") +
   scale_y_continuous(limits = c(0, NA)) +
-  labs(x = "Year", y = "Observed/Expected", title = "Survey Index Fits by Fleet")
+  labs(x = "Year", y = "Index", title = "Survey and CPUE Fits on Arithmetic Scale")
 ```
 
 ## Residuals
 
 ```{r}
 #| label: fig-residuals
-#| fig-cap: "Log residuals for survey index fits by fleet."
+#| fig-cap: "Arithmetic residuals (observed minus predicted) for BTS, ATS, AVO, and CPUE."
 resid_df <- fits |>
   mutate(
-    log_resid = log(observed) - log(predicted)
+    residual = observed - predicted
   )
 
 ylim_zero <- function(x) {
   c(min(0, min(x, na.rm = TRUE)), max(0, max(x, na.rm = TRUE)))
 }
 
-ggplot(resid_df, aes(x = year, y = log_resid)) +
+ggplot(resid_df, aes(x = year, y = residual)) +
   geom_hline(yintercept = 0, color = "gray50", linewidth = 0.4) +
   geom_point(size = 1.1, alpha = 0.7) +
   facet_wrap(~series, scales = "free_y") +
-  scale_y_continuous(limits = ylim_zero(resid_df$log_resid)) +
-  labs(x = "Year", y = "Log residual", title = "Survey Index Log Residuals by Fleet")
+  scale_y_continuous(limits = ylim_zero(resid_df$residual)) +
+  labs(x = "Year", y = "Observed - predicted", title = "Survey and CPUE Residuals on Arithmetic Scale")
 ```
 
 ## Age Composition Fits
@@ -350,64 +352,148 @@ make_agecomp_df <- function(series_id) {
     normalize_agecomp(expected)
 }
 
+make_obs_agecomp_df <- function(fleet_name) {
+  data_ebs |>
+    filter(type == "age_comp", name == fleet_name, value != -999) |>
+    transmute(year = timing, age, observed = value) |>
+    normalize_agecomp(observed)
+}
+
 agecomp_fishery <- make_agecomp_df(agecomp_map[["fishery"]])
+obs_agecomp_fishery <- make_obs_agecomp_df("fishery")
 
 ggplot(agecomp_fishery, aes(x = age, y = expected)) +
   geom_line(linewidth = 0.5, color = "#4daf4a") +
+  geom_point(
+    data = obs_agecomp_fishery,
+    aes(x = age, y = observed),
+    inherit.aes = FALSE,
+    color = "#1f78b4",
+    size = 0.9,
+    alpha = 0.8
+  ) +
   facet_wrap(~year) +
   scale_y_continuous(limits = c(0, NA)) +
-  labs(x = "Age", y = "Expected proportion", title = "Fishery Age Composition Fits (Expected)")
+  labs(x = "Age", y = "Proportion", title = "Fishery Age Composition Fits")
 ```
 
 ```{r}
 #| label: fig-agecomp-bts
-#| fig-cap: "Expected BTS age-composition patterns, faceted by year."
+#| fig-cap: "Observed and predicted BTS age-composition patterns, faceted by year."
 agecomp_bts <- make_agecomp_df(agecomp_map[["bts"]])
+obs_agecomp_bts <- make_obs_agecomp_df("bts")
 
 ggplot(agecomp_bts, aes(x = age, y = expected)) +
   geom_line(linewidth = 0.5, color = "#4daf4a") +
+  geom_point(
+    data = obs_agecomp_bts,
+    aes(x = age, y = observed),
+    inherit.aes = FALSE,
+    color = "#1f78b4",
+    size = 0.9,
+    alpha = 0.8
+  ) +
   facet_wrap(~year) +
   scale_y_continuous(limits = c(0, NA)) +
-  labs(x = "Age", y = "Expected proportion", title = "BTS Age Composition Fits (Expected)")
+  labs(x = "Age", y = "Proportion", title = "BTS Age Composition Fits")
 ```
 
 ```{r}
 #| label: fig-agecomp-ats
-#| fig-cap: "Expected ATS age-composition patterns, faceted by year."
+#| fig-cap: "Observed and predicted ATS age-composition patterns, faceted by year."
 agecomp_ats <- make_agecomp_df(agecomp_map[["ats"]])
+obs_agecomp_ats <- make_obs_agecomp_df("ats")
 
 ggplot(agecomp_ats, aes(x = age, y = expected)) +
   geom_line(linewidth = 0.5, color = "#4daf4a") +
+  geom_point(
+    data = obs_agecomp_ats,
+    aes(x = age, y = observed),
+    inherit.aes = FALSE,
+    color = "#1f78b4",
+    size = 0.9,
+    alpha = 0.8
+  ) +
   facet_wrap(~year) +
   scale_y_continuous(limits = c(0, NA)) +
-  labs(x = "Age", y = "Expected proportion", title = "ATS Age Composition Fits (Expected)")
+  labs(x = "Age", y = "Proportion", title = "ATS Age Composition Fits")
 ```
 
 ## Selectivity Curves
 
 ```{r}
 #| label: fig-selectivity-curves
-#| fig-cap: "Estimated selectivity-at-age curves by fleet."
-sel <- est |>
-  filter(label == "sum_selectivity", !is.na(age_i)) |>
-  mutate(age = age_i)
+#| fig-cap: "Estimated selectivity-at-age curves by fleet. Curves are reconstructed from the fitted fleet-specific selectivity parameter blocks."
+logistic_selectivity <- function(age, inflection_point, slope) {
+  1 / (1 + exp(-slope * (age - inflection_point)))
+}
 
-ggplot(sel, aes(x = age, y = estimated)) +
-  geom_line(color = "#984ea3", linewidth = 0.8) +
-  facet_wrap(~fleet, scales = "free_y") +
-  scale_y_continuous(limits = c(0, NA)) +
-  labs(x = "Age", y = "Selectivity", title = "Selectivity at Age")
-```
-
-```{r}
-#| label: fig-selectivity-assumptions
-#| fig-cap: "Illustrative selectivity assumptions by gear for selected years. In the current implementation these assumptions are time-invariant, so the curves are identical across years."
 double_logistic <- function(age, inflection_point_asc, slope_asc, inflection_point_desc, slope_desc) {
   asc <- 1 / (1 + exp(-slope_asc * (age - inflection_point_asc)))
   desc <- 1 / (1 + exp(slope_desc * (age - inflection_point_desc)))
   asc * desc
 }
 
+selectivity_template <- tibble::tribble(
+  ~fleet,     ~module_type,
+  "ats",      "DoubleLogistic",
+  "avo",      "DoubleLogistic",
+  "bts",      "Logistic",
+  "cpue",     "Logistic",
+  "fishery",  "Logistic"
+)
+
+selectivity_parameters <- est |>
+  filter(module_name == "Selectivity") |>
+  distinct(parameter_id, module_type, label, estimated) |>
+  arrange(parameter_id) |>
+  mutate(block_id = cumsum(c(TRUE, diff(parameter_id) != 1L))) |>
+  group_by(block_id) |>
+  mutate(module_type = first(module_type)) |>
+  ungroup() |>
+  distinct(block_id, module_type, label, estimated) |>
+  group_by(block_id, module_type) |>
+  summarize(values = list(stats::setNames(estimated, label)), .groups = "drop") |>
+  left_join(
+    selectivity_template |>
+      mutate(block_id = row_number()),
+    by = c("block_id", "module_type")
+  )
+
+selectivity_curves <- selectivity_parameters |>
+  rowwise() |>
+  mutate(
+    curve = list({
+      pars <- values
+      sel <- if (module_type == "Logistic") {
+        logistic_selectivity(ages, pars[["inflection_point"]], pars[["slope"]])
+      } else {
+        double_logistic(
+          ages,
+          pars[["inflection_point_asc"]],
+          pars[["slope_asc"]],
+          pars[["inflection_point_desc"]],
+          pars[["slope_desc"]]
+        )
+      }
+
+      tibble(age = ages, selectivity = sel)
+    })
+  ) |>
+  ungroup() |>
+  select(fleet, curve) |>
+  unnest(curve)
+
+ggplot(selectivity_curves, aes(x = age, y = selectivity)) +
+  geom_line(color = "#984ea3", linewidth = 0.8) +
+  facet_wrap(~fleet) +
+  scale_y_continuous(limits = c(0, NA)) +
+  labs(x = "Age", y = "Selectivity", title = "Selectivity at Age")
+```
+
+```{r}
+#| label: fig-selectivity-assumptions
+#| fig-cap: "Illustrative selectivity assumptions by gear for selected years. Fishery and BTS are initialized with asymptotic logistic selectivity, while ATS and AVO use double-logistic assumptions. In the current implementation these assumptions are time-invariant, so the curves are identical across years."
 selected_years <- c(min(years), years[ceiling(length(years) / 2)], max(years))
 
 sel_assumptions <- tidyr::crossing(
@@ -416,12 +502,19 @@ sel_assumptions <- tidyr::crossing(
   age = ages
 ) |>
   mutate(
-    selectivity = double_logistic(
-      age = age,
-      inflection_point_asc = 2,
-      slope_asc = 1,
-      inflection_point_desc = 4,
-      slope_desc = 1
+    selectivity = dplyr::case_when(
+      gear %in% c("fishery", "bts") ~ logistic_selectivity(
+        age = age,
+        inflection_point = 2,
+        slope = 1
+      ),
+      TRUE ~ double_logistic(
+        age = age,
+        inflection_point_asc = 2,
+        slope_asc = 1,
+        inflection_point_desc = 4,
+        slope_desc = 1
+      )
     ),
     gear = factor(gear, levels = c("fishery", "bts", "ats", "avo"))
   )
@@ -439,6 +532,84 @@ ggplot(sel_assumptions, aes(x = age, y = selectivity, color = factor(year))) +
 ```
 
 ## Diagnostics
+
+This section summarizes basic model-status diagnostics for the current fit and provides a place to evaluate a 5-peel retrospective case when retrospective output is available.
+
+```{r}
+#| label: tbl-model-status
+#| tbl-cap: "Summary diagnostics for the current fitted model."
+model_status_tbl <- tibble::tibble(
+  metric = c(
+    "FIMS version",
+    "Max gradient",
+    "Fixed effects",
+    "Random effects",
+    "Retrospective output",
+    "Interpretation"
+  ),
+  value = c(
+    as.character(fit$version),
+    sprintf("%.4f", fit$max_gradient),
+    as.character(fit$number_of_parameters[["fixed_effects"]]),
+    as.character(fit$number_of_parameters[["random_effects"]]),
+    ifelse(file.exists(file.path(project_root, "outputs", "retro_5_peel_summary.rds")), "available", "not yet run"),
+    ifelse(
+      fit$max_gradient <= 0.01,
+      "Mode appears well converged by gradient threshold.",
+      "Mode should be treated as provisional; gradient is larger than a typical convergence target."
+    )
+  )
+)
+
+model_status_tbl |>
+  gt() |>
+  tab_header(title = "Model Status Diagnostics")
+```
+
+```{r}
+#| label: fig-ssb-recruitment
+#| fig-cap: "Fitted spawning biomass and expected recruitment trajectories from the current model fit."
+recruitment <- est |>
+  filter(label == "expected_recruitment") |>
+  mutate(year = map_year(year_i)) |>
+  transmute(year, value = estimated, quantity = "Recruitment")
+
+ssb_diag <- est |>
+  filter(label == "spawning_biomass") |>
+  mutate(year = map_year(year_i)) |>
+  transmute(year, value = estimated, quantity = "SSB")
+
+diag_series <- bind_rows(ssb_diag, recruitment)
+
+ggplot(diag_series, aes(x = year, y = value)) +
+  geom_line(color = "#2c7fb8", linewidth = 0.8) +
+  facet_wrap(~quantity, scales = "free_y", ncol = 1) +
+  scale_y_continuous(limits = c(0, NA)) +
+  labs(x = "Year", y = NULL, title = "Spawning Biomass and Recruitment")
+```
+
+```{r}
+#| label: fig-retro-5-peel
+#| fig-cap: "Five-peel retrospective trajectories for spawning biomass when retrospective output is available."
+retro_path <- file.path(project_root, "outputs", "retro_5_peel_summary.rds")
+
+if (file.exists(retro_path)) {
+  retro <- readRDS(retro_path)
+
+  ggplot(retro, aes(x = year, y = value, color = factor(peel))) +
+    geom_line(linewidth = 0.8) +
+    facet_wrap(~quantity, scales = "free_y", ncol = 1) +
+    scale_y_continuous(limits = c(0, NA)) +
+    labs(x = "Year", y = NULL, color = "Peel", title = "Five-Peel Retrospective Diagnostics")
+} else {
+  plot.new()
+  text(
+    0.5, 0.5,
+    "Five-peel retrospective output not found.\nCreate outputs/retro_5_peel_summary.rds to populate this figure.",
+    cex = 1
+  )
+}
+```
 
 ```{r}
 #| label: tbl-diagnostics
