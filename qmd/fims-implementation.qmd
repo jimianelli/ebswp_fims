@@ -168,9 +168,33 @@ $$
 
 where \(y_t\) and \(\hat{y}_t\) are observed and expected landings or index, \(\sigma_t\) is the lognormal SD, \(n_{a,t}\) are age-composition counts (or effective sample sizes), and \(p_{a,t}\) are predicted age proportions.
 
+## SparseNUTS Scaffold
+
+The repository includes a first-pass scaffold for Bayesian sampling with `SparseNUTS` using the existing FIMS/TMB objective. The main entry points are `scripts/sparsenuts_framework.R`, which builds the FIMS objects and exposes helper functions for extracting the TMB objective, and `scripts/03_fit_sparse_nuts.R`, which runs a conditional mode fit followed by `SparseNUTS` sampling.
+
+The intended MCMC workflow is to use the maximum-likelihood fit as an initialization and preconditioning step, then sample the joint posterior for estimable fixed effects with `SparseNUTS`. In this application, that would allow posterior summaries for quantities such as spawning biomass, recruitment, fishing mortality, selectivity parameters, and survey catchability, while retaining the same core FIMS/TMB model structure used for the deterministic fit.
+
+At present this should be treated as an implementation scaffold rather than a validated Bayesian assessment workflow. The code path for building the model object and passing it to `SparseNUTS` is in place, but full end-to-end sampling has not yet been verified for this application, and posterior diagnostics such as divergences, effective sample size, split-\(\hat{R}\), and prior sensitivity have not yet been evaluated. In practice, additional work will likely be needed on parameter blocking, scaling, priors, and possibly on how random effects or transformed parameters are exposed to the sampler.
+
+Once operational, the expected MCMC outputs would include posterior draws saved to `outputs/sparsenuts_fit.rds`, from which trace plots, marginal posterior summaries, posterior intervals for SSB and recruitment, and posterior predictive checks could be added to this report.
+
+An example command is shown below.
+
+```sh
+Rscript scripts/03_fit_sparse_nuts.R \
+  --num-samples=250 \
+  --num-warmup=250 \
+  --chains=4 \
+  --cores=1 \
+  --metric=diag \
+  --seed=123
+```
+
+By default this writes `outputs/sparsenuts_fit.rds`.
+
 # Fit Results
 
-The fitted spawning biomass trajectory is shown in @fig-ssb. Fishery observed and predicted landings are compared in @fig-landings-fit, while survey and CPUE index fits are summarized in @fig-fits-by-fleet and residual patterns are shown in @fig-residuals. These index series are shown on their native arithmetic scales with separate facet scales because the magnitudes differ across surveys and CPUE. Expected age-composition outputs for fishery, BTS, and ATS are shown in @fig-agecomp-fishery, @fig-agecomp-bts, and @fig-agecomp-ats, respectively, while selectivity is shown in @fig-selectivity-curves. The time-invariant selectivity assumptions used to initialize each gear are shown for selected years in @fig-selectivity-assumptions. A diagnostics overview, including model status and the fitted SSB and recruitment trajectories, is shown in @tbl-model-status and @fig-ssb-recruitment. Likelihood diagnostics and key parameter summaries are reported in @tbl-diagnostics, @tbl-recruitment-parameters, and @tbl-q.
+The fitted spawning biomass trajectory is shown in @fig-ssb. Fishery observed and predicted landings are compared in @fig-landings-fit, while survey and CPUE index fits are summarized in @fig-fits-by-fleet and residual patterns are shown in @fig-residuals. These index series are shown on their native arithmetic scales with separate facet scales because the magnitudes differ across surveys and CPUE, and the residuals are standardized by the input observation standard deviations on the arithmetic scale. Expected age-composition outputs for fishery, BTS, and ATS are shown in @fig-agecomp-fishery, @fig-agecomp-bts, and @fig-agecomp-ats, respectively, while selectivity is shown in @fig-selectivity-curves. The time-invariant selectivity assumptions used to initialize each gear are shown for selected years in @fig-selectivity-assumptions. A diagnostics overview, including model status and the fitted SSB and recruitment trajectories, is shown in @tbl-model-status and @fig-ssb-recruitment. Likelihood diagnostics and key parameter summaries are reported in @tbl-diagnostics, @tbl-recruitment-parameters, and @tbl-q.
 
 ```{r load-fit}
 if (!exists("doc_dir")) {
@@ -244,7 +268,7 @@ ggplot(land, aes(x = year)) +
 #| fig-cap: "Observed and predicted index series for BTS, ATS, AVO, and CPUE shown on arithmetic scales with separate facet axes."
 obs_index <- data_ebs |>
   filter(type == "index", value != -999) |>
-  transmute(series = toupper(name), year = timing, observed = value)
+  transmute(series = toupper(name), year = timing, observed = value, uncertainty = uncertainty)
 
 pred_index <- purrr::map2_dfr(
   rep$index_expected,
@@ -281,7 +305,7 @@ score_map <- function(pred_tbl, obs_tbl) {
 index_map <- score_map(pred_index, obs_index)
 
 fits <- pred_index |>
-  left_join(index_map, by = "series_id") |>
+  inner_join(index_map, by = "series_id") |>
   left_join(obs_index, by = c("series", "year")) |>
   mutate(series = factor(series, levels = c("BTS", "ATS", "AVO", "CPUE")))
 
@@ -297,22 +321,27 @@ ggplot(fits, aes(x = year)) +
 
 ```{r}
 #| label: fig-residuals
-#| fig-cap: "Arithmetic residuals (observed minus predicted) for BTS, ATS, AVO, and CPUE."
+#| fig-cap: "Standardized arithmetic residuals for BTS, ATS, AVO, and CPUE. Residuals are divided by the input observation standard deviation on the arithmetic scale."
+log_sd_to_sd <- function(mu, log_sd) {
+  mu * sqrt(exp(log_sd^2) - 1)
+}
+
 resid_df <- fits |>
   mutate(
-    residual = observed - predicted
+    obs_sd = log_sd_to_sd(observed, uncertainty),
+    std_residual = ifelse(is.finite(obs_sd) & obs_sd > 0, (observed - predicted) / obs_sd, NA_real_)
   )
 
 ylim_zero <- function(x) {
   c(min(0, min(x, na.rm = TRUE)), max(0, max(x, na.rm = TRUE)))
 }
 
-ggplot(resid_df, aes(x = year, y = residual)) +
+ggplot(resid_df, aes(x = year, y = std_residual)) +
   geom_hline(yintercept = 0, color = "gray50", linewidth = 0.4) +
   geom_point(size = 1.1, alpha = 0.7) +
   facet_wrap(~series, scales = "free_y") +
-  scale_y_continuous(limits = ylim_zero(resid_df$residual)) +
-  labs(x = "Year", y = "Observed - predicted", title = "Survey and CPUE Residuals on Arithmetic Scale")
+  scale_y_continuous(limits = ylim_zero(resid_df$std_residual)) +
+  labs(x = "Year", y = "Standardized residual", title = "Survey and CPUE Standardized Residuals")
 ```
 
 ## Age Composition Fits
@@ -439,7 +468,6 @@ selectivity_template <- tibble::tribble(
   "ats",      "DoubleLogistic",
   "avo",      "DoubleLogistic",
   "bts",      "Logistic",
-  "cpue",     "Logistic",
   "fishery",  "Logistic"
 )
 
@@ -756,6 +784,55 @@ survey_agecomp <- data_ebs |>
 survey_agecomp |>
   gt(groupname_col = "fleet") |>
   tab_header(title = "Survey Proportions-at-Age (Most Recent Year)")
+```
+
+# Appendix
+
+## Parameter Estimates
+
+The full parameter listing is shown in @tbl-parameter-appendix. Standard deviations are reported when they are available in the fitted summary object; blank entries indicate that uncertainty output was not available for that parameter in the current saved fit.
+
+```{r}
+#| label: tbl-parameter-appendix
+#| tbl-cap: "Appendix table of fitted parameter estimates and standard deviations, where available."
+parameter_appendix <- est |>
+  filter(estimation_type %in% c("fixed_effects", "random_effects")) |>
+  distinct(
+    module_name,
+    module_type,
+    fleet,
+    label,
+    year_i,
+    age_i,
+    parameter_id,
+    estimated,
+    uncertainty,
+    estimation_type
+  ) |>
+  mutate(
+    fleet = dplyr::coalesce(fleet, ""),
+    year = dplyr::if_else(!is.na(year_i), map_year(year_i), NA_real_),
+    age = age_i,
+    sd = dplyr::if_else(is.finite(uncertainty), uncertainty, NA_real_)
+  ) |>
+  select(
+    parameter_id,
+    module_name,
+    module_type,
+    fleet,
+    label,
+    year,
+    age,
+    estimation_type,
+    estimate = estimated,
+    sd
+  ) |>
+  arrange(module_name, fleet, label, year, age, parameter_id)
+
+parameter_appendix |>
+  gt() |>
+  fmt_number(columns = c(year, age, estimate, sd), decimals = 3) |>
+  tab_header(title = "Appendix: Parameter Estimates")
 ```
 
 # Notes

@@ -66,6 +66,7 @@ build_fims_inputs_from_payload <- function(payload) {
     ) |>
     dplyr::mutate(
       selectivity_shared_with = dplyr::case_when(
+        module_name == "Selectivity" & fleet_name == "cpue" ~ "fishery",
         module_name == "Selectivity" & fleet_name == "avo" ~ "ats",
         TRUE ~ NA_character_
       )
