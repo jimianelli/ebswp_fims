@@ -26,6 +26,23 @@ theme_set(ggthemes::theme_few())
 if (requireNamespace("FIMSdiags", quietly = TRUE)) {
   library(FIMSdiags)
 }
+
+drop_all_na_cols <- function(data) {
+  data |>
+    select(where(~!all(is.na(.x))))
+}
+
+gt_report <- function(data, ...) {
+  data <- drop_all_na_cols(data)
+  table <- gt(data, ...)
+
+  if ("year" %in% names(data)) {
+    table <- table |>
+      fmt_number(columns = "year", decimals = 0, use_seps = FALSE)
+  }
+
+  table
+}
 ```
 
 # Overview
@@ -78,7 +95,7 @@ summary_tbl <- tibble::tibble(
 )
 
 summary_tbl |>
-  gt() |>
+  gt_report() |>
   tab_header(title = "FIMS Input Summary")
 ```
 
@@ -96,7 +113,7 @@ availability <- data_ebs |>
   )
 
 availability |>
-  gt() |>
+  gt_report() |>
   tab_header(title = "Data Availability by Fleet")
 ```
 
@@ -590,7 +607,7 @@ model_status_tbl <- tibble::tibble(
 )
 
 model_status_tbl |>
-  gt() |>
+  gt_report() |>
   tab_header(title = "Model Status Diagnostics")
 ```
 
@@ -652,7 +669,7 @@ diag_tbl <- est |>
   )
 
 diag_tbl |>
-  gt() |>
+  gt_report() |>
   tab_header(title = "Likelihood Diagnostics by Component")
 ```
 
@@ -667,7 +684,7 @@ param_tbl <- est |>
   distinct()
 
 param_tbl |>
-  gt() |>
+  gt_report() |>
   tab_header(title = "Key Recruitment Parameters")
 ```
 
@@ -680,7 +697,7 @@ q_tbl <- est |>
   select(fleet, q)
 
 q_tbl |>
-  gt() |>
+  gt_report() |>
   tab_header(title = "Survey Catchability (q)")
 ```
 
@@ -698,7 +715,7 @@ waa_tbl <- data_ebs |>
   arrange(age)
 
 waa_tbl |>
-  gt() |>
+  gt_report() |>
   tab_header(title = "Weight-at-Age (Most Recent Year)")
 ```
 
@@ -714,7 +731,7 @@ initial_naa_tbl <- naa_tbl |>
   filter(year == min(year, na.rm = TRUE))
 
 initial_naa_tbl |>
-  gt() |>
+  gt_report() |>
   fmt_number(columns = value, decimals = 3) |>
   tab_header(title = "Initial Numbers-at-Age")
 ```
@@ -726,7 +743,7 @@ terminal_naa_tbl <- naa_tbl |>
   filter(year == max(year, na.rm = TRUE))
 
 terminal_naa_tbl |>
-  gt() |>
+  gt_report() |>
   fmt_number(columns = value, decimals = 3) |>
   tab_header(title = "Terminal Numbers-at-Age")
 ```
@@ -745,7 +762,7 @@ mat_tbl <- tibble::tibble(
   arrange(age)
 
 mat_tbl |>
-  gt() |>
+  gt_report() |>
   fmt_number(columns = value, decimals = 3) |>
   tab_header(title = "Maturity-at-Age")
 ```
@@ -761,7 +778,7 @@ catch_tbl <- est |>
   arrange(age)
 
 catch_tbl |>
-  gt() |>
+  gt_report() |>
   tab_header(title = "Catch-at-Age (Most Recent Year)")
 ```
 
@@ -782,7 +799,7 @@ survey_agecomp <- data_ebs |>
   arrange(fleet, age)
 
 survey_agecomp |>
-  gt(groupname_col = "fleet") |>
+  gt_report(groupname_col = "fleet") |>
   tab_header(title = "Survey Proportions-at-Age (Most Recent Year)")
 ```
 
@@ -830,8 +847,8 @@ parameter_appendix <- est |>
   arrange(module_name, fleet, label, year, age, parameter_id)
 
 parameter_appendix |>
-  gt() |>
-  fmt_number(columns = c(year, age, estimate, sd), decimals = 3) |>
+  gt_report() |>
+  fmt_number(columns = any_of(c("age", "estimate", "sd")), decimals = 3) |>
   tab_header(title = "Appendix: Parameter Estimates")
 ```
 
