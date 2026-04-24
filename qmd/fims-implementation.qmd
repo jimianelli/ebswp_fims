@@ -352,9 +352,11 @@ $$
 
 where \(y_t\) and \(\hat{y}_t\) are observed and expected landings or index, \(\sigma_t\) is the lognormal SD, \(n_{a,t}\) are age-composition counts (or effective sample sizes), and \(p_{a,t}\) are predicted age proportions.
 
-# Fit Results: `run0`
+# Results
 
-The current fitted results are for `run0`. The fitted spawning biomass trajectory is shown in @fig-ssb. Fishery observed and predicted landings are compared in @fig-landings-fit, while survey and CPUE index fits are summarized in @fig-fits-by-fleet and residual patterns are shown in @fig-residuals. These index series are shown on their native arithmetic scales with separate facet scales because the magnitudes differ across surveys and CPUE, and the residuals are standardized by the input observation standard deviations on the arithmetic scale. Expected age-composition outputs for fishery, BTS, and ATS are shown in @fig-agecomp-fishery, @fig-agecomp-bts, and @fig-agecomp-ats, respectively, while selectivity is shown in @fig-selectivity-curves. The time-invariant selectivity assumptions used to initialize each gear are shown for selected years in @fig-selectivity-assumptions. A diagnostics overview, including model status and the fitted SSB and recruitment trajectories, is shown in @tbl-model-status and @fig-ssb-recruitment. Likelihood diagnostics and key parameter summaries are reported in @tbl-diagnostics, @tbl-recruitment-parameters, and @tbl-q.
+## Fit to run0
+
+The current fitted results are for `run0`. The fitted spawning biomass trajectory is shown in @fig-ssb. Fishery observed and predicted landings are compared in @fig-landings-fit, while survey and CPUE index fits are summarized in @fig-fits-by-fleet and residual patterns are shown in @fig-residuals. These index series are shown on their native arithmetic scales with separate facet scales because the magnitudes differ across surveys and CPUE, and the residuals are standardized by the input observation standard deviations on the arithmetic scale. Expected age-composition outputs for fishery, BTS, and ATS are shown in @fig-agecomp-fishery, @fig-agecomp-bts, and @fig-agecomp-ats, respectively, while selectivity is shown in @fig-selectivity-curves. The time-invariant selectivity assumptions used to initialize each gear are shown for selected years in @fig-selectivity-assumptions. A diagnostics overview, including model status and the fitted SSB and recruitment trajectories, is shown in @tbl-model-status and @fig-ssb-recruitment. The estimated stock-recruitment relationship for both fitted models is shown in @fig-stock-recruitment. Likelihood diagnostics and key parameter summaries are reported in @tbl-diagnostics, @tbl-recruitment-parameters, and @tbl-q.
 
 ```{r load-fit}
 if (!exists("doc_dir")) {
@@ -383,8 +385,6 @@ map_year <- function(year_i) {
 }
 ```
 
-## Spawning Biomass
-
 ```{r}
 #| label: fig-ssb
 #| fig-cap: "Estimated spawning biomass over time from the fitted EBS pollock FIMS model."
@@ -398,7 +398,7 @@ ggplot(ssb, aes(x = year, y = estimated)) +
   labs(x = "Year", y = "SSB", title = "Spawning Biomass")
 ```
 
-## Landings Fit
+### Landings Fit
 
 ```{r}
 #| label: fig-landings-fit
@@ -421,7 +421,7 @@ ggplot(land, aes(x = year)) +
   labs(x = "Year", y = "Landings", title = "Fishery Landings: Observed vs Expected")
 ```
 
-## Fits by Fleet
+### Fits by fleet
 
 ```{r}
 #| label: fig-fits-by-fleet
@@ -477,7 +477,7 @@ ggplot(fits, aes(x = year)) +
   labs(x = "Year", y = "Index", title = "Survey and CPUE Fits on Arithmetic Scale")
 ```
 
-## Residuals
+### Residuals
 
 ```{r}
 #| label: fig-residuals
@@ -504,7 +504,7 @@ ggplot(resid_df, aes(x = year, y = std_residual)) +
   labs(x = "Year", y = "Standardized residual", title = "Survey and CPUE Standardized Residuals")
 ```
 
-## Age Composition Fits
+### Age composition fits
 
 ```{r}
 #| label: fig-agecomp-fishery
@@ -617,7 +617,7 @@ ggplot(agecomp_ats, aes(x = age, y = expected)) +
   labs(x = "Age", y = "Proportion", title = "ATS Age Composition Fits")
 ```
 
-## Selectivity Curves
+### Selectivity curves
 
 ```{r}
 #| label: fig-selectivity-curves
@@ -728,7 +728,7 @@ ggplot(sel_assumptions, aes(x = age, y = selectivity, color = factor(year))) +
   )
 ```
 
-## Diagnostics
+### Diagnostics
 
 This section summarizes basic model-status diagnostics for the current fit and provides a place to evaluate a 5-peel retrospective case when retrospective output is available.
 
@@ -825,7 +825,7 @@ diag_tbl |>
   tab_header(title = "Likelihood Diagnostics by Component")
 ```
 
-# Fit Results: `TVselex`
+## Time-varying selectivity run
 
 ```{r}
 #| label: tvselex-status-data
@@ -942,7 +942,7 @@ if (length(tvselex_fishery_rows) == 0) tvselex_fishery_rows <- "not available"
 
 The `TVselex` run was attempted as a time-varying fishery selectivity alternative to `run0`. This model increases flexibility by estimating the fishery double-logistic ascending inflection point by year, while retaining time-invariant values for the other fishery selectivity parameters. In the current attempt, this expanded the model to `r tvselex_fixed_effects` fixed effects, including `r tvselex_fishery_rows` time-varying fishery selectivity rows.
 
-The reduced `TVselex` formulation completed, but the maximum gradient remains large, so these results should be treated as a diagnostic attempt rather than an accepted comparison model. The fit produced a total NLL of `r tvselex_status$value[tvselex_status$metric == "Total NLL"]` and terminal spawning biomass of `r tvselex_status$value[tvselex_status$metric == "Terminal SB"]`, but these quantities should not be interpreted until the convergence problem is resolved. The next iteration should add structure to the annual ascending-inflection estimates, such as time blocks, smoothing, bounds, or penalties.
+The current `TVselex` formulation completed with a maximum gradient of `r tvselex_status$value[tvselex_status$metric == "Max gradient"]`, total NLL of `r tvselex_status$value[tvselex_status$metric == "Total NLL"]`, and terminal spawning biomass of `r tvselex_status$value[tvselex_status$metric == "Terminal SB"]`.
 
 ```{r}
 #| label: tbl-tvselex-status
@@ -950,6 +950,51 @@ The reduced `TVselex` formulation completed, but the maximum gradient remains la
 run_status_comparison |>
   gt_report() |>
   tab_header(title = "Run Status Comparison")
+```
+
+```{r}
+#| label: fig-stock-recruitment
+#| fig-cap: "Estimated stock-recruitment relationship for run0 and TVselex. Text labels show model years, with spawning biomass on the x-axis and expected recruitment on the y-axis."
+make_stock_recruitment <- function(estimates, model_name) {
+  ssb_values <- estimates |>
+    filter(label == "spawning_biomass") |>
+    transmute(year = map_year(year_i), spawning_biomass = estimated)
+
+  recruitment_values <- estimates |>
+    filter(label == "expected_recruitment") |>
+    transmute(year = map_year(year_i), recruitment = estimated)
+
+  inner_join(ssb_values, recruitment_values, by = "year") |>
+    mutate(model = model_name)
+}
+
+stock_recruitment <- make_stock_recruitment(est, "run0")
+
+if (!is.null(tvselex) && identical(tvselex$status, "fit completed")) {
+  stock_recruitment <- bind_rows(
+    stock_recruitment,
+    make_stock_recruitment(tvselex$estimates, "TVselex")
+  )
+}
+
+ggplot(
+  stock_recruitment,
+  aes(
+    x = spawning_biomass,
+    y = recruitment,
+    label = year,
+    color = model
+  )
+) +
+  geom_text(size = 2.6, alpha = 0.85) +
+  scale_x_continuous(limits = c(0, NA)) +
+  scale_y_continuous(limits = c(0, NA)) +
+  labs(
+    x = "Spawning biomass",
+    y = "Expected recruitment",
+    color = "Model",
+    title = "Estimated Stock-Recruitment Relationship"
+  )
 ```
 
 ```{r}
@@ -1027,7 +1072,7 @@ if (!is.null(tvselex) && identical(tvselex$status, "fit completed")) {
 }
 ```
 
-## SparseNUTS Scaffold
+# SparseNUTS Scaffold
 
 The repository includes a first-pass scaffold for Bayesian sampling with `SparseNUTS` using the existing FIMS/TMB objective. The main entry points are `scripts/sparsenuts_framework.R`, which builds the FIMS objects and exposes helper functions for extracting the TMB objective, and `scripts/03_fit_sparse_nuts.R`, which runs a conditional mode fit followed by `SparseNUTS` sampling.
 
