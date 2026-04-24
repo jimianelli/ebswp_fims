@@ -869,6 +869,8 @@ Ianelli, J. N., Fissel, B., Holsman, K., Honkalehto, T., Kotwicki, S., Monnahan,
 
 NOAA-FIMS. 2026. *Fisheries Integrated Modeling System (FIMS)*. Version `r fit$version`. GitHub organization and FIMS development repository. Accessed April 24, 2026. <https://github.com/NOAA-FIMS>.
 
+Monnahan, C. *SparseNUTS: Sparse No-U-Turn MCMC Sampling for Template Model Builder*. R package version `r if (requireNamespace("SparseNUTS", quietly = TRUE)) as.character(utils::packageVersion("SparseNUTS")) else "not installed"`. Accessed April 24, 2026. <https://noaa-afsc.github.io/SparseNUTS>.
+
 # Notes
 
 - AVO selectivity sharing (`selectivity_shared_with = "ats"`) is not recognized by FIMS ≥ 0.9.0; AVO selectivity is currently estimated independently.
