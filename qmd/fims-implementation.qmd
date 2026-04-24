@@ -728,103 +728,6 @@ ggplot(sel_assumptions, aes(x = age, y = selectivity, color = factor(year))) +
   )
 ```
 
-### Diagnostics
-
-This section summarizes basic model-status diagnostics for the current fit and provides a place to evaluate a 5-peel retrospective case when retrospective output is available.
-
-```{r}
-#| label: tbl-model-status
-#| tbl-cap: "Summary diagnostics for the current fitted model."
-model_status_tbl <- tibble::tibble(
-  metric = c(
-    "FIMS version",
-    "Max gradient",
-    "Fixed effects",
-    "Random effects",
-    "Retrospective output",
-    "Interpretation"
-  ),
-  value = c(
-    as.character(fit$version),
-    sprintf("%.4f", fit$max_gradient),
-    as.character(fit$number_of_parameters[["fixed_effects"]]),
-    as.character(fit$number_of_parameters[["random_effects"]]),
-    ifelse(file.exists(file.path(project_root, "outputs", "retro_5_peel_summary.rds")), "available", "not yet run"),
-    ifelse(
-      fit$max_gradient <= 0.01,
-      "Mode appears well converged by gradient threshold.",
-      "Mode should be treated as provisional; gradient is larger than a typical convergence target."
-    )
-  )
-)
-
-model_status_tbl |>
-  gt_report() |>
-  tab_header(title = "Model Status Diagnostics")
-```
-
-```{r}
-#| label: fig-ssb-recruitment
-#| fig-cap: "Fitted spawning biomass and expected recruitment trajectories from the current model fit."
-recruitment <- est |>
-  filter(label == "expected_recruitment") |>
-  mutate(year = map_year(year_i)) |>
-  transmute(year, value = estimated, quantity = "Recruitment")
-
-ssb_diag <- est |>
-  filter(label == "spawning_biomass") |>
-  mutate(year = map_year(year_i)) |>
-  transmute(year, value = estimated, quantity = "SSB")
-
-diag_series <- bind_rows(ssb_diag, recruitment)
-
-ggplot(diag_series, aes(x = year, y = value)) +
-  geom_line(color = "#2c7fb8", linewidth = 0.8) +
-  facet_wrap(~quantity, scales = "free_y", ncol = 1) +
-  scale_y_continuous(limits = c(0, NA)) +
-  labs(x = "Year", y = NULL, title = "Spawning Biomass and Recruitment")
-```
-
-```{r}
-#| label: fig-retro-5-peel
-#| fig-cap: "Five-peel retrospective trajectories for spawning biomass when retrospective output is available."
-retro_path <- file.path(project_root, "outputs", "retro_5_peel_summary.rds")
-
-if (file.exists(retro_path)) {
-  retro <- readRDS(retro_path)
-
-  ggplot(retro, aes(x = year, y = value, color = factor(peel))) +
-    geom_line(linewidth = 0.8) +
-    facet_wrap(~quantity, scales = "free_y", ncol = 1) +
-    scale_y_continuous(limits = c(0, NA)) +
-    labs(x = "Year", y = NULL, color = "Peel", title = "Five-Peel Retrospective Diagnostics")
-} else {
-  plot.new()
-  text(
-    0.5, 0.5,
-    "Five-peel retrospective output not found.\nCreate outputs/retro_5_peel_summary.rds to populate this figure.",
-    cex = 1
-  )
-}
-```
-
-```{r}
-#| label: tbl-diagnostics
-#| tbl-cap: "Likelihood diagnostics by model component."
-diag_tbl <- est |>
-  filter(!is.na(likelihood)) |>
-  group_by(module_name, label) |>
-  summarize(
-    n = n(),
-    mean_ll = mean(likelihood, na.rm = TRUE),
-    .groups = "drop"
-  )
-
-diag_tbl |>
-  gt_report() |>
-  tab_header(title = "Likelihood Diagnostics by Component")
-```
-
 ## Time-varying selectivity run
 
 ```{r}
@@ -1070,6 +973,119 @@ if (!is.null(tvselex) && identical(tvselex$status, "fit completed")) {
     cex = 1
   )
 }
+```
+
+## Diagnostics
+
+This section summarizes basic model-status diagnostics for the fitted models and provides a place to evaluate a 5-peel retrospective case when retrospective output is available.
+
+```{r}
+#| label: tbl-model-status
+#| tbl-cap: "Summary diagnostics for the current fitted model."
+model_status_tbl <- tibble::tibble(
+  metric = c(
+    "FIMS version",
+    "Max gradient",
+    "Fixed effects",
+    "Random effects",
+    "Retrospective output",
+    "Interpretation"
+  ),
+  value = c(
+    as.character(fit$version),
+    sprintf("%.4f", fit$max_gradient),
+    as.character(fit$number_of_parameters[["fixed_effects"]]),
+    as.character(fit$number_of_parameters[["random_effects"]]),
+    ifelse(file.exists(file.path(project_root, "outputs", "retro_5_peel_summary.rds")), "available", "not yet run"),
+    ifelse(
+      fit$max_gradient <= 0.01,
+      "Mode appears well converged by gradient threshold.",
+      "Mode should be treated as provisional; gradient is larger than a typical convergence target."
+    )
+  )
+)
+
+model_status_tbl |>
+  gt_report() |>
+  tab_header(title = "Model Status Diagnostics")
+```
+
+```{r}
+#| label: fig-ssb-recruitment
+#| fig-cap: "Fitted spawning biomass and expected recruitment trajectories from run0 and TVselex."
+make_diag_series <- function(estimates, model_name) {
+  recruitment_values <- estimates |>
+    filter(label == "expected_recruitment") |>
+    mutate(year = map_year(year_i)) |>
+    transmute(model = model_name, year, value = estimated, quantity = "Recruitment")
+
+  ssb_values <- estimates |>
+    filter(label == "spawning_biomass") |>
+    mutate(year = map_year(year_i)) |>
+    transmute(model = model_name, year, value = estimated, quantity = "SSB")
+
+  bind_rows(ssb_values, recruitment_values)
+}
+
+diag_series <- make_diag_series(est, "run0")
+
+if (!is.null(tvselex) && identical(tvselex$status, "fit completed")) {
+  diag_series <- bind_rows(
+    diag_series,
+    make_diag_series(tvselex$estimates, "TVselex")
+  )
+}
+
+ggplot(diag_series, aes(x = year, y = value, color = model)) +
+  geom_line(linewidth = 0.8) +
+  facet_wrap(~quantity, scales = "free_y", ncol = 1) +
+  scale_y_continuous(limits = c(0, NA)) +
+  labs(
+    x = "Year",
+    y = NULL,
+    color = "Model",
+    title = "Spawning Biomass and Recruitment by Model"
+  )
+```
+
+```{r}
+#| label: fig-retro-5-peel
+#| fig-cap: "Five-peel retrospective trajectories for spawning biomass when retrospective output is available."
+retro_path <- file.path(project_root, "outputs", "retro_5_peel_summary.rds")
+
+if (file.exists(retro_path)) {
+  retro <- readRDS(retro_path)
+
+  ggplot(retro, aes(x = year, y = value, color = factor(peel))) +
+    geom_line(linewidth = 0.8) +
+    facet_wrap(~quantity, scales = "free_y", ncol = 1) +
+    scale_y_continuous(limits = c(0, NA)) +
+    labs(x = "Year", y = NULL, color = "Peel", title = "Five-Peel Retrospective Diagnostics")
+} else {
+  plot.new()
+  text(
+    0.5, 0.5,
+    "Five-peel retrospective output not found.\nCreate outputs/retro_5_peel_summary.rds to populate this figure.",
+    cex = 1
+  )
+}
+```
+
+```{r}
+#| label: tbl-diagnostics
+#| tbl-cap: "Likelihood diagnostics by model component."
+diag_tbl <- est |>
+  filter(!is.na(likelihood)) |>
+  group_by(module_name, label) |>
+  summarize(
+    n = n(),
+    mean_ll = mean(likelihood, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+diag_tbl |>
+  gt_report() |>
+  tab_header(title = "Likelihood Diagnostics by Component")
 ```
 
 # SparseNUTS Scaffold
