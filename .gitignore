@@ -9,7 +9,9 @@
 # Local analysis artifacts
 outputs/fims_fit.rds
 outputs/fims_fit_summary.rds
+outputs/retro_5_peel_summary.rds
 outputs/tvselex_fit_summary.rds
+outputs/tvselex_retro_5_peel_summary.rds
 outputs/sparsenuts_fit.rds
 outputs/qmd/
 

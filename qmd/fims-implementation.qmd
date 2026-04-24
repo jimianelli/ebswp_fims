@@ -856,51 +856,6 @@ run_status_comparison |>
 ```
 
 ```{r}
-#| label: fig-stock-recruitment
-#| fig-cap: "Estimated stock-recruitment relationship for run0 and TVselex. Text labels show model years, with spawning biomass on the x-axis and expected recruitment on the y-axis."
-make_stock_recruitment <- function(estimates, model_name) {
-  ssb_values <- estimates |>
-    filter(label == "spawning_biomass") |>
-    transmute(year = map_year(year_i), spawning_biomass = estimated)
-
-  recruitment_values <- estimates |>
-    filter(label == "expected_recruitment") |>
-    transmute(year = map_year(year_i), recruitment = estimated)
-
-  inner_join(ssb_values, recruitment_values, by = "year") |>
-    mutate(model = model_name)
-}
-
-stock_recruitment <- make_stock_recruitment(est, "run0")
-
-if (!is.null(tvselex) && identical(tvselex$status, "fit completed")) {
-  stock_recruitment <- bind_rows(
-    stock_recruitment,
-    make_stock_recruitment(tvselex$estimates, "TVselex")
-  )
-}
-
-ggplot(
-  stock_recruitment,
-  aes(
-    x = spawning_biomass,
-    y = recruitment,
-    label = year,
-    color = model
-  )
-) +
-  geom_text(size = 2.6, alpha = 0.85) +
-  scale_x_continuous(limits = c(0, NA)) +
-  scale_y_continuous(limits = c(0, NA)) +
-  labs(
-    x = "Spawning biomass",
-    y = "Expected recruitment",
-    color = "Model",
-    title = "Estimated Stock-Recruitment Relationship"
-  )
-```
-
-```{r}
 #| label: tbl-tvselex-gradient-diagnostics
 #| tbl-cap: "Largest absolute gradients from the TVselex TMB objective, matched back to the fixed-effect parameter table."
 if (!is.null(tvselex) && !is.null(tvselex$gradient_diagnostics)) {
@@ -996,7 +951,12 @@ model_status_tbl <- tibble::tibble(
     sprintf("%.4f", fit$max_gradient),
     as.character(fit$number_of_parameters[["fixed_effects"]]),
     as.character(fit$number_of_parameters[["random_effects"]]),
-    ifelse(file.exists(file.path(project_root, "outputs", "retro_5_peel_summary.rds")), "available", "not yet run"),
+    paste(
+      "run0",
+      ifelse(file.exists(file.path(project_root, "outputs", "retro_5_peel_summary.rds")), "available", "not yet run"),
+      "; TVselex",
+      ifelse(file.exists(file.path(project_root, "outputs", "tvselex_retro_5_peel_summary.rds")), "available", "not yet run")
+    ),
     ifelse(
       fit$max_gradient <= 0.01,
       "Mode appears well converged by gradient threshold.",
@@ -1049,23 +1009,93 @@ ggplot(diag_series, aes(x = year, y = value, color = model)) +
 ```
 
 ```{r}
+#| label: fig-stock-recruitment
+#| fig-cap: "Estimated stock-recruitment relationship for run0 and TVselex. Text labels show model years, with spawning biomass on the x-axis and expected recruitment on the y-axis."
+make_stock_recruitment <- function(estimates, model_name) {
+  ssb_values <- estimates |>
+    filter(label == "spawning_biomass") |>
+    transmute(year = map_year(year_i), spawning_biomass = estimated)
+
+  recruitment_values <- estimates |>
+    filter(label == "expected_recruitment") |>
+    transmute(year = map_year(year_i), recruitment = estimated)
+
+  inner_join(ssb_values, recruitment_values, by = "year") |>
+    mutate(model = model_name)
+}
+
+stock_recruitment <- make_stock_recruitment(est, "run0")
+
+if (!is.null(tvselex) && identical(tvselex$status, "fit completed")) {
+  stock_recruitment <- bind_rows(
+    stock_recruitment,
+    make_stock_recruitment(tvselex$estimates, "TVselex")
+  )
+}
+
+ggplot(
+  stock_recruitment,
+  aes(
+    x = spawning_biomass,
+    y = recruitment,
+    label = year,
+    color = model
+  )
+) +
+  geom_text(size = 2.6, alpha = 0.85) +
+  scale_x_continuous(limits = c(0, NA)) +
+  scale_y_continuous(limits = c(0, NA)) +
+  labs(
+    x = "Spawning biomass",
+    y = "Expected recruitment",
+    color = "Model",
+    title = "Estimated Stock-Recruitment Relationship"
+  )
+```
+
+```{r}
 #| label: fig-retro-5-peel
-#| fig-cap: "Five-peel retrospective trajectories for spawning biomass when retrospective output is available."
+#| fig-cap: "Five-peel retrospective trajectories for spawning biomass and recruitment when retrospective output is available. Failed peels are omitted from the plotted trajectories."
 retro_path <- file.path(project_root, "outputs", "retro_5_peel_summary.rds")
+tvselex_retro_path <- file.path(project_root, "outputs", "tvselex_retro_5_peel_summary.rds")
+
+retro_inputs <- list()
+
+add_retro_run <- function(retro, run_name) {
+  if ("run" %in% names(retro)) {
+    retro |>
+      mutate(run = dplyr::coalesce(.data$run, run_name))
+  } else {
+    retro |>
+      mutate(run = run_name)
+  }
+}
 
 if (file.exists(retro_path)) {
-  retro <- readRDS(retro_path)
+  retro_inputs$run0 <- add_retro_run(readRDS(retro_path), "run0")
+}
+
+if (file.exists(tvselex_retro_path)) {
+  retro_inputs$TVselex <- add_retro_run(readRDS(tvselex_retro_path), "TVselex")
+}
+
+if (length(retro_inputs) > 0) {
+  retro <- bind_rows(retro_inputs)
+  if ("status" %in% names(retro)) {
+    retro <- retro |>
+      filter(is.na(status) | status == "fit completed")
+  }
 
   ggplot(retro, aes(x = year, y = value, color = factor(peel))) +
     geom_line(linewidth = 0.8) +
-    facet_wrap(~quantity, scales = "free_y", ncol = 1) +
+    facet_grid(run ~ quantity, scales = "free_y") +
     scale_y_continuous(limits = c(0, NA)) +
     labs(x = "Year", y = NULL, color = "Peel", title = "Five-Peel Retrospective Diagnostics")
 } else {
   plot.new()
   text(
     0.5, 0.5,
-    "Five-peel retrospective output not found.\nCreate outputs/retro_5_peel_summary.rds to populate this figure.",
+    "Five-peel retrospective output not found.\nCreate outputs/retro_5_peel_summary.rds or outputs/tvselex_retro_5_peel_summary.rds to populate this figure.",
     cex = 1
   )
 }
