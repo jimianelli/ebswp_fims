@@ -1088,7 +1088,7 @@ if (length(retro_inputs) > 0) {
 
   ggplot(retro, aes(x = year, y = value, color = factor(peel))) +
     geom_line(linewidth = 0.8) +
-    facet_grid(run ~ quantity, scales = "free_y") +
+    facet_wrap(vars(run, quantity), scales = "free_y", ncol = 1) +
     scale_y_continuous(limits = c(0, NA)) +
     labs(x = "Year", y = NULL, color = "Peel", title = "Five-Peel Retrospective Diagnostics")
 } else {

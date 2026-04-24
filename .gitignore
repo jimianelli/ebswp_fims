@@ -12,7 +12,9 @@ outputs/fims_fit_summary.rds
 outputs/retro_5_peel_summary.rds
 outputs/tvselex_fit_summary.rds
 outputs/tvselex_retro_5_peel_summary.rds
+outputs/tvselex_sparsenuts_fit.rds
 outputs/sparsenuts_fit.rds
+outputs/figures/
 outputs/qmd/
 
 /.quarto/

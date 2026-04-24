@@ -133,6 +133,112 @@ build_fims_inputs <- function(project_root = resolve_project_root()) {
   build_fims_inputs_from_payload(payload)
 }
 
+build_tvselex_inputs_from_payload <- function(payload) {
+  suppressPackageStartupMessages({
+    library(dplyr)
+    library(tidyr)
+    library(FIMS)
+  })
+
+  data_4_model <- FIMSFrame(payload$data_ebs)
+
+  cfg_tvselex <- create_default_configurations(data_4_model) |>
+    tidyr::unnest(cols = data) |>
+    dplyr::rows_update(
+      tibble::tibble(
+        module_name = "Selectivity",
+        fleet_name = c("fishery", "bts", "ats", "avo"),
+        module_type = c("DoubleLogistic", "Logistic", "DoubleLogistic", "DoubleLogistic")
+      ),
+      by = c("module_name", "fleet_name")
+    ) |>
+    tidyr::nest(.by = c(model_family, module_name, fleet_name))
+
+  pars_tvselex_base <- create_default_parameters(cfg_tvselex, data_4_model) |>
+    tidyr::unnest(cols = data) |>
+    dplyr::rows_update(
+      tibble::tibble(
+        module_name = "Recruitment",
+        label = c(
+          rep("log_devs", length((get_start_year(data_4_model) + 1):get_end_year(data_4_model))),
+          "log_sd"
+        ),
+        time = c(
+          (get_start_year(data_4_model) + 1):get_end_year(data_4_model),
+          NA_real_
+        ),
+        value = c(
+          rep(0, length((get_start_year(data_4_model) + 1):get_end_year(data_4_model))),
+          0.1
+        ),
+        estimation_type = c(
+          rep("fixed_effects", length((get_start_year(data_4_model) + 1):get_end_year(data_4_model))),
+          "constant"
+        )
+      ),
+      by = c("module_name", "label", "time")
+    ) |>
+    dplyr::rows_update(
+      tibble::tibble(
+        module_name = "Selectivity",
+        fleet_name = "avo",
+        label = c(
+          "inflection_point_asc",
+          "slope_asc",
+          "inflection_point_desc",
+          "slope_desc"
+        ),
+        value = c(1.5, 2.0, 8.0, 0.1),
+        estimation_type = "constant"
+      ),
+      by = c("module_name", "fleet_name", "label")
+    )
+
+  fishery_tvselex <- pars_tvselex_base |>
+    dplyr::filter(
+      module_name == "Selectivity",
+      fleet_name == "fishery",
+      label == "inflection_point_asc"
+    ) |>
+    dplyr::select(-time) |>
+    tidyr::crossing(time = payload$years) |>
+    dplyr::mutate(estimation_type = "fixed_effects")
+
+  pars_tvselex <- pars_tvselex_base |>
+    dplyr::filter(
+      !(
+        module_name == "Selectivity" &
+          fleet_name == "fishery" &
+          label == "inflection_point_asc"
+      )
+    ) |>
+    dplyr::bind_rows(fishery_tvselex) |>
+    dplyr::mutate(
+      selectivity_shared_with = dplyr::case_when(
+        module_name == "Selectivity" & fleet_name == "cpue" ~ "fishery",
+        TRUE ~ NA_character_
+      )
+    )
+
+  list(
+    payload = payload,
+    data_4_model = data_4_model,
+    configurations = cfg_tvselex,
+    parameters = pars_tvselex,
+    input = initialize_fims(pars_tvselex, data_4_model)
+  )
+}
+
+build_tvselex_inputs <- function(project_root = resolve_project_root()) {
+  data_path <- file.path(project_root, "data", "ebs_fims_data.rds")
+  if (!file.exists(data_path)) {
+    stop("Missing input data. Run scripts/01_build_data.R first: ", data_path)
+  }
+
+  payload <- readRDS(data_path)
+  build_tvselex_inputs_from_payload(payload)
+}
+
 fit_fims_mode_for_snuts <- function(project_root = resolve_project_root(),
                                     get_sd = FALSE,
                                     number_of_loops = 3,
@@ -143,10 +249,38 @@ fit_fims_mode_for_snuts <- function(project_root = resolve_project_root(),
 
   source(file.path(project_root, "fimsfit.R"), local = .GlobalEnv)
   if (!exists("is_fims_verbose", mode = "function")) {
-    is_fims_verbose <- function() FALSE
+    assign("is_fims_verbose", function() FALSE, envir = .GlobalEnv)
   }
 
   built <- build_fims_inputs(project_root = project_root)
+
+  fit <- fit_fims(
+    built$input,
+    get_sd = get_sd,
+    number_of_loops = number_of_loops,
+    control = control
+  )
+
+  list(
+    fit = fit,
+    built = built
+  )
+}
+
+fit_tvselex_mode_for_snuts <- function(project_root = resolve_project_root(),
+                                       get_sd = FALSE,
+                                       number_of_loops = 1,
+                                       control = list(eval.max = 10000, iter.max = 10000, trace = 0)) {
+  suppressPackageStartupMessages({
+    library(FIMS)
+  })
+
+  source(file.path(project_root, "fimsfit.R"), local = .GlobalEnv)
+  if (!exists("is_fims_verbose", mode = "function")) {
+    assign("is_fims_verbose", function() FALSE, envir = .GlobalEnv)
+  }
+
+  built <- build_tvselex_inputs(project_root = project_root)
 
   fit <- fit_fims(
     built$input,
