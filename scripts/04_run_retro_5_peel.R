@@ -30,34 +30,56 @@ fit_one_peel <- function(peel) {
   peel_payload <- make_retro_payload(payload, peel = peel)
   built <- build_fims_inputs_from_payload(peel_payload)
 
-  fit <- fit_fims(
-    built$input,
-    get_sd = FALSE,
-    number_of_loops = 1,
-    control = list(eval.max = 10000, iter.max = 10000, trace = 0)
-  )
-
-  est <- get_estimates(fit)
-
-  bind_rows(
-    est |>
-      filter(label == "spawning_biomass") |>
-      transmute(
-        peel = peel,
-        quantity = "SSB",
-        year = built$payload$years[year_i],
-        value = estimated,
-        max_gradient = get_max_gradient(fit)
-      ),
-    est |>
-      filter(label == "expected_recruitment") |>
-      transmute(
-        peel = peel,
-        quantity = "Recruitment",
-        year = built$payload$years[year_i],
-        value = estimated,
-        max_gradient = get_max_gradient(fit)
+  tryCatch(
+    {
+      fit <- fit_fims(
+        built$input,
+        get_sd = FALSE,
+        number_of_loops = 1,
+        control = list(eval.max = 10000, iter.max = 10000, trace = 0)
       )
+
+      est <- get_estimates(fit)
+
+      bind_rows(
+        est |>
+          filter(label == "spawning_biomass") |>
+          transmute(
+            run = "run0",
+            peel = peel,
+            quantity = "SSB",
+            year = built$payload$years[year_i],
+            value = estimated,
+            max_gradient = get_max_gradient(fit),
+            status = "fit completed",
+            error = NA_character_
+          ),
+        est |>
+          filter(label == "expected_recruitment") |>
+          transmute(
+            run = "run0",
+            peel = peel,
+            quantity = "Recruitment",
+            year = built$payload$years[year_i],
+            value = estimated,
+            max_gradient = get_max_gradient(fit),
+            status = "fit completed",
+            error = NA_character_
+          )
+      )
+    },
+    error = function(e) {
+      tibble::tibble(
+        run = "run0",
+        peel = peel,
+        quantity = c("SSB", "Recruitment"),
+        year = NA_integer_,
+        value = NA_real_,
+        max_gradient = NA_real_,
+        status = "fit failed",
+        error = conditionMessage(e)
+      )
+    }
   )
 }
 

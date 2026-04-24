@@ -60,13 +60,14 @@ build_tvselex_inputs_from_payload <- function(payload) {
           rep("fixed_effects", length((get_start_year(data_4_model) + 1):get_end_year(data_4_model))),
           "constant"
         )
-      ),
-      by = c("module_name", "label", "time")
-    ) |>
-    dplyr::rows_update(
-      tibble::tibble(
-        module_name = "Selectivity",
-        fleet_name = "avo",
+    ),
+    by = c("module_name", "label", "time")
+  ) |>
+  apply_age_specific_natural_mortality() |>
+  dplyr::rows_update(
+    tibble::tibble(
+      module_name = "Selectivity",
+      fleet_name = "avo",
         label = c(
           "inflection_point_asc",
           "slope_asc",

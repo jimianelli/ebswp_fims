@@ -58,6 +58,7 @@ pars_tvselex_base <- create_default_parameters(cfg_tvselex, data_4_model) |>
     ),
     by = c("module_name", "label", "time")
   ) |>
+  apply_age_specific_natural_mortality() |>
   dplyr::rows_update(
     tibble::tibble(
       module_name = "Selectivity",

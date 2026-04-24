@@ -57,6 +57,7 @@ The current FIMS configuration should be interpreted as a reduced implementation
 - The 2024 assessment links AVO selectivity to the ATS selectivity pattern. In this FIMS implementation, AVO is represented with fixed double-logistic selectivity parameters rather than sharing the estimated ATS selectivity curve.
 - The 2024 assessment allows time variation in the BTS selectivity inflection point for ages 2 and older. The baseline FIMS run uses time-invariant logistic BTS selectivity.
 - The 2024 assessment fishery selectivity is represented with non-parametric coefficients and regularity penalties. The baseline FIMS run uses a parametric logistic fishery selectivity curve, while the `TVselex` exploratory run uses a double-logistic fishery curve with annual variation only in the ascending inflection point.
+- The 2024 assessment uses age-specific natural mortality. This FIMS implementation now fixes natural mortality by age, constant over years, at \(M_1 = 0.9\), \(M_2 = 0.45\), and \(M_{3+} = 0.3\).
 - Other apparent simplifications include omitting length-composition data, omitting seasonal/subannual timing structure, using empirical stock-level weight-at-age inputs, and keeping recruitment variance treatment simpler than the production assessment configuration.
 
 # Data Inputs
@@ -135,6 +136,7 @@ availability |>
 - **Population**: single stock
 - **Fleets**: fishery, BTS, ATS, AVO, CPUE
 - **Recruitment**: Beverton-Holt with fixed-effect deviations and fixed recruitment log-SD
+- **Natural mortality**: fixed by age and constant over years, with \(M_1 = 0.9\), \(M_2 = 0.45\), and \(M_{3+} = 0.3\)
 - **Selectivity**: asymptotic logistic for fishery and BTS; estimated double logistic for ATS; fixed double logistic for AVO
 - **Selectivity sharing**: CPUE shares fishery selectivity
 - **Growth**: empirical WAA from stock-level SSB weights
@@ -193,6 +195,18 @@ pars <- create_default_parameters(cfg, data_4_model) |>
       )
     ),
     by = c("module_name", "label", "time")
+  ) |>
+  dplyr::mutate(
+    value = dplyr::case_when(
+      module_name == "Population" & label == "log_M" & age == 1 ~ log(0.9),
+      module_name == "Population" & label == "log_M" & age == 2 ~ log(0.45),
+      module_name == "Population" & label == "log_M" & age >= 3 ~ log(0.3),
+      TRUE ~ value
+    ),
+    estimation_type = dplyr::case_when(
+      module_name == "Population" & label == "log_M" ~ "constant",
+      TRUE ~ estimation_type
+    )
   ) |>
   dplyr::rows_update(
     tibble::tibble(
@@ -260,6 +274,18 @@ pars_tvselex_base <- create_default_parameters(cfg_tvselex, data_4_model) |>
     ),
     by = c("module_name", "label", "time")
   ) |>
+  dplyr::mutate(
+    value = dplyr::case_when(
+      module_name == "Population" & label == "log_M" & age == 1 ~ log(0.9),
+      module_name == "Population" & label == "log_M" & age == 2 ~ log(0.45),
+      module_name == "Population" & label == "log_M" & age >= 3 ~ log(0.3),
+      TRUE ~ value
+    ),
+    estimation_type = dplyr::case_when(
+      module_name == "Population" & label == "log_M" ~ "constant",
+      TRUE ~ estimation_type
+    )
+  ) |>
   dplyr::rows_update(
     tibble::tibble(
       module_name = "Selectivity",
@@ -304,62 +330,6 @@ pars_tvselex <- pars_tvselex_base |>
 
 input_tvselex <- initialize_fims(pars_tvselex, data_4_model)
 ```
-
-## Equations
-
-We use a standard catch-at-age model. Key components are summarized below.
-
-Recruitment (Beverton–Holt):
-
-$$
-R_t = \frac{0.8 R_0 h S_{t-1}}{0.2 R_0 \phi_0 (1-h) + S_{t-1}(h-0.2)} \exp(\epsilon_t)
-$$
-
-with deviations \(\epsilon_t\) estimated as fixed effects.
-
-Numbers-at-age dynamics:
-
-$$
-N_{a,t} = N_{a-1,t-1} \exp(-Z_{a-1,t-1})
-$$
-
-with a plus-group at the maximum age.
-
-Initial numbers at age:
-
-$$
-N_{a,1} = R_0 \exp(-(a-1)M), \quad N_{A,1} = \frac{R_0 \exp(-(A-1)M)}{1 - \exp(-M)}
-$$
-
-Total mortality:
-
-$$
-Z_{a,t} = M_a + \sum_f F_{f,t} s_{f,a}
-$$
-
-where \(s_{f,a}\) is fleet selectivity at age.
-
-Spawning biomass:
-
-$$
-SSB_t = \sum_a N_{a,t} w_{a} m_{a}
-$$
-
-Likelihood components:
-
-Lognormal (landings and indices):
-
-$$
-\ell_{\text{lnorm}} = \sum_t \left[-\frac{\left(\log y_t - \log \hat{y}_t\right)^2}{2\sigma_t^2} - \log y_t - \log(\sigma_t\sqrt{2\pi})\right]
-$$
-
-Multinomial (age compositions):
-
-$$
-\ell_{\text{mult}} = \sum_{t} \log\left(\frac{N_t!}{\prod_a n_{a,t}!}\right) + \sum_t \sum_a n_{a,t} \log p_{a,t}
-$$
-
-where \(y_t\) and \(\hat{y}_t\) are observed and expected landings or index, \(\sigma_t\) is the lognormal SD, \(n_{a,t}\) are age-composition counts (or effective sample sizes), and \(p_{a,t}\) are predicted age proportions.
 
 # Results
 
@@ -1103,8 +1073,8 @@ ggplot(
 ```
 
 ```{r}
-#| label: fig-retro-5-peel
-#| fig-cap: "Five-peel retrospective trajectories for spawning biomass and recruitment when retrospective output is available. Failed peels are omitted from the plotted trajectories."
+#| label: retro-5-peel-data
+#| include: false
 retro_path <- file.path(project_root, "outputs", "retro_5_peel_summary.rds")
 tvselex_retro_path <- file.path(project_root, "outputs", "tvselex_retro_5_peel_summary.rds")
 
@@ -1134,20 +1104,50 @@ if (length(retro_inputs) > 0) {
     retro <- retro |>
       filter(is.na(status) | status == "fit completed")
   }
-
-  ggplot(retro, aes(x = year, y = value, color = factor(peel))) +
-    geom_line(linewidth = 0.8) +
-    facet_wrap(vars(run, quantity), scales = "free_y", ncol = 1) +
-    scale_y_continuous(limits = c(0, NA)) +
-    labs(x = "Year", y = NULL, color = "Peel", title = "Five-Peel Retrospective Diagnostics")
 } else {
-  plot.new()
-  text(
-    0.5, 0.5,
-    "Five-peel retrospective output not found.\nCreate outputs/retro_5_peel_summary.rds or outputs/tvselex_retro_5_peel_summary.rds to populate this figure.",
-    cex = 1
-  )
+  retro <- tibble::tibble()
 }
+
+plot_retro_model <- function(retro_data, model_name) {
+  retro_model <- retro_data |>
+    filter(run == model_name)
+
+  if (nrow(retro_model) > 0) {
+    ggplot(retro_model, aes(x = year, y = value, color = factor(peel))) +
+      geom_line(linewidth = 0.8) +
+      facet_wrap(vars(quantity), scales = "free_y", ncol = 1) +
+      scale_y_continuous(limits = c(0, NA)) +
+      labs(
+        x = "Year",
+        y = NULL,
+        color = "Peel",
+        title = paste("Five-Peel Retrospective Diagnostics:", model_name)
+      )
+  } else {
+    plot.new()
+    text(
+      0.5, 0.5,
+      paste0(
+        "Five-peel retrospective output not found for ",
+        model_name,
+        ".\nFailed peels are omitted from this figure."
+      ),
+      cex = 1
+    )
+  }
+}
+```
+
+```{r}
+#| label: fig-retro-run0
+#| fig-cap: "Five-peel retrospective trajectories for spawning biomass and recruitment from the run0 configuration. Failed peels are omitted from the plotted trajectories."
+plot_retro_model(retro, "run0")
+```
+
+```{r}
+#| label: fig-retro-tvselex
+#| fig-cap: "Five-peel retrospective trajectories for spawning biomass and recruitment from the TVselex configuration. Failed peels are omitted from the plotted trajectories."
+plot_retro_model(retro, "TVselex")
 ```
 
 ```{r}
@@ -1332,6 +1332,120 @@ catch_comparison |>
 ```
 
 # Appendix
+
+## Model Equations and Assumptions {#sec-model-equations}
+
+The fitted runs use a standard catch-at-age model. Key fixed assumptions and structural simplifications are summarized in @tbl-model-assumptions.
+
+```{r}
+#| label: tbl-model-assumptions
+#| tbl-cap: "Key model assumptions and fixed parameters in the current FIMS implementation."
+assumptions_tbl <- tibble::tibble(
+  component = c(
+    "Natural mortality",
+    "Recruitment",
+    "Recruitment variability",
+    "Fishery selectivity",
+    "BTS selectivity",
+    "ATS selectivity",
+    "AVO selectivity",
+    "CPUE selectivity",
+    "Growth",
+    "Maturity",
+    "Length composition",
+    "Seasonal timing",
+    "Landings uncertainty"
+  ),
+  current_fims_setting = c(
+    "Age- and year-indexed `log_M` rows are created; values are fixed over years at `M1 = 0.9`, `M2 = 0.45`, and `M3+ = 0.3`.",
+    "Beverton-Holt stock-recruitment with estimated `log_rzero`; steepness fixed at `h = 0.6875`.",
+    "Annual recruitment deviations are fixed effects for 1965-2024; recruitment `log_sd` fixed at 0.1.",
+    "`run0` uses time-invariant logistic selectivity; `TVselex` uses double-logistic selectivity with annual ascending inflection points.",
+    "Time-invariant logistic selectivity.",
+    "Time-invariant double-logistic selectivity.",
+    "Fixed double-logistic selectivity: ascending inflection 1.5, ascending slope 2.0, descending inflection 8.0, descending slope 0.1.",
+    "Shares fishery selectivity.",
+    "Empirical weight-at-age from ATS WAA, filled by age-specific means where needed.",
+    "Fixed maturity-at-age schedule.",
+    "Omitted.",
+    "Omitted; annual time step only.",
+    "Fixed log-SD of 0.05."
+  ),
+  contrast_with_2024_assessment = c(
+    "Matches the production-assessment feature of age-specific natural mortality more closely than the previous scalar-M implementation.",
+    "Same general stock-recruitment family, but this implementation keeps the variance treatment simpler.",
+    "Simpler than the production assessment treatment of recruitment variability and uncertainty.",
+    "Production model uses non-parametric fishery selectivity coefficients with regularity penalties.",
+    "Production model allows time variation in the BTS selectivity inflection point for ages 2 and older.",
+    "Closer to the production model structure than the other survey selectivity simplifications.",
+    "Production model links AVO selectivity to ATS; this implementation fixes AVO independently.",
+    "Simplified sharing assumption retained in this implementation.",
+    "Uses empirical stock-level inputs rather than a full growth process.",
+    "Uses a fixed schedule rather than estimating maturity.",
+    "Production assessment includes length information; this implementation does not.",
+    "Production assessment includes more detailed timing structure.",
+    "Simplified placeholder uncertainty."
+  )
+)
+
+assumptions_tbl |>
+  gt_report() |>
+  fmt_markdown(columns = everything()) |>
+  tab_header(title = "Key FIMS Model Assumptions and Fixed Parameters")
+```
+
+Recruitment (Beverton-Holt):
+
+$$
+R_t = \frac{0.8 R_0 h S_{t-1}}{0.2 R_0 \phi_0 (1-h) + S_{t-1}(h-0.2)} \exp(\epsilon_t)
+$$
+
+with deviations \(\epsilon_t\) estimated as fixed effects.
+
+Numbers-at-age dynamics:
+
+$$
+N_{a,t} = N_{a-1,t-1} \exp(-Z_{a-1,t-1})
+$$
+
+with a plus-group at the maximum age.
+
+Initial numbers at age:
+
+$$
+N_{a,1} = R_0 \exp\left(-\sum_{j=1}^{a-1} M_j\right), \quad
+N_{A,1} = \frac{R_0 \exp\left(-\sum_{j=1}^{A-1} M_j\right)}{1 - \exp(-M_A)}
+$$
+
+Total mortality:
+
+$$
+Z_{a,t} = M_a + \sum_f F_{f,t} s_{f,a}
+$$
+
+where \(M_a\) is fixed at 0.9 for age 1, 0.45 for age 2, and 0.3 for ages 3 and older, and \(s_{f,a}\) is fleet selectivity at age.
+
+Spawning biomass:
+
+$$
+SSB_t = \sum_a N_{a,t} w_{a} m_{a}
+$$
+
+Likelihood components:
+
+Lognormal (landings and indices):
+
+$$
+\ell_{\text{lnorm}} = \sum_t \left[-\frac{\left(\log y_t - \log \hat{y}_t\right)^2}{2\sigma_t^2} - \log y_t - \log(\sigma_t\sqrt{2\pi})\right]
+$$
+
+Multinomial (age compositions):
+
+$$
+\ell_{\text{mult}} = \sum_{t} \log\left(\frac{N_t!}{\prod_a n_{a,t}!}\right) + \sum_t \sum_a n_{a,t} \log p_{a,t}
+$$
+
+where \(y_t\) and \(\hat{y}_t\) are observed and expected landings or index, \(\sigma_t\) is the lognormal SD, \(n_{a,t}\) are age-composition counts (or effective sample sizes), and \(p_{a,t}\) are predicted age proportions.
 
 ## Data Tables
 

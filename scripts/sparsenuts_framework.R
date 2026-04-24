@@ -26,6 +26,29 @@ default_snuts_control <- function() {
   )
 }
 
+natural_mortality_at_age <- function(age) {
+  dplyr::case_when(
+    age == 1 ~ 0.9,
+    age == 2 ~ 0.45,
+    age >= 3 ~ 0.3,
+    TRUE ~ NA_real_
+  )
+}
+
+apply_age_specific_natural_mortality <- function(parameters) {
+  parameters |>
+    dplyr::mutate(
+      value = dplyr::case_when(
+        module_name == "Population" & label == "log_M" ~ log(natural_mortality_at_age(age)),
+        TRUE ~ value
+      ),
+      estimation_type = dplyr::case_when(
+        module_name == "Population" & label == "log_M" ~ "constant",
+        TRUE ~ estimation_type
+      )
+    )
+}
+
 build_fims_inputs_from_payload <- function(payload) {
   suppressPackageStartupMessages({
     library(dplyr)
@@ -77,6 +100,7 @@ build_fims_inputs_from_payload <- function(payload) {
       ),
       by = c("module_name", "label", "time")
     ) |>
+    apply_age_specific_natural_mortality() |>
     dplyr::rows_update(
       tibble::tibble(
         module_name = "Selectivity",
@@ -100,13 +124,15 @@ build_fims_inputs_from_payload <- function(payload) {
     )
 
   if (!is.null(base) && !is.null(base$report$F)) {
+    f_init <- as.numeric(base$report$F)[seq_along(pm_years)]
+
     pars <- pars |>
       dplyr::rows_update(
         tibble::tibble(
           fleet_name = "fishery",
           label = "log_Fmort",
           time = pm_years,
-          value = log(base$report$F)
+          value = log(f_init)
         ),
         by = c("fleet_name", "label", "time")
       )
@@ -178,6 +204,7 @@ build_tvselex_inputs_from_payload <- function(payload) {
       ),
       by = c("module_name", "label", "time")
     ) |>
+    apply_age_specific_natural_mortality() |>
     dplyr::rows_update(
       tibble::tibble(
         module_name = "Selectivity",
