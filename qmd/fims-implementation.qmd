@@ -344,6 +344,9 @@ ggplot(resid_df, aes(x = year, y = std_residual)) +
 ```{r}
 #| label: fig-agecomp-fishery
 #| fig-cap: "Expected fishery age-composition patterns, faceted by year."
+#| fig-width: 8
+#| fig-height: 11
+#| out-width: "100%"
 agecomp_counts <- vapply(rep$agecomp_expected, function(x) sum(x > 0, na.rm = TRUE), numeric(1))
 agecomp_map <- c(
   fishery = which(agecomp_counts == 900)[1],
@@ -396,7 +399,7 @@ ggplot(agecomp_fishery, aes(x = age, y = expected)) +
     size = 0.9,
     alpha = 0.8
   ) +
-  facet_wrap(~year) +
+  facet_wrap(~year, ncol = 5, dir = "v") +
   scale_y_continuous(limits = c(0, NA)) +
   labs(x = "Age", y = "Proportion", title = "Fishery Age Composition Fits")
 ```
@@ -404,6 +407,9 @@ ggplot(agecomp_fishery, aes(x = age, y = expected)) +
 ```{r}
 #| label: fig-agecomp-bts
 #| fig-cap: "Observed and predicted BTS age-composition patterns, faceted by year."
+#| fig-width: 8
+#| fig-height: 11
+#| out-width: "100%"
 agecomp_bts <- make_agecomp_df(agecomp_map[["bts"]])
 obs_agecomp_bts <- make_obs_agecomp_df("bts")
 
@@ -417,7 +423,7 @@ ggplot(agecomp_bts, aes(x = age, y = expected)) +
     size = 0.9,
     alpha = 0.8
   ) +
-  facet_wrap(~year) +
+  facet_wrap(~year, ncol = 4, dir = "v") +
   scale_y_continuous(limits = c(0, NA)) +
   labs(x = "Age", y = "Proportion", title = "BTS Age Composition Fits")
 ```
@@ -425,6 +431,9 @@ ggplot(agecomp_bts, aes(x = age, y = expected)) +
 ```{r}
 #| label: fig-agecomp-ats
 #| fig-cap: "Observed and predicted ATS age-composition patterns, faceted by year."
+#| fig-width: 8
+#| fig-height: 11
+#| out-width: "100%"
 agecomp_ats <- make_agecomp_df(agecomp_map[["ats"]])
 obs_agecomp_ats <- make_obs_agecomp_df("ats")
 
@@ -438,7 +447,7 @@ ggplot(agecomp_ats, aes(x = age, y = expected)) +
     size = 0.9,
     alpha = 0.8
   ) +
-  facet_wrap(~year) +
+  facet_wrap(~year, ncol = 3, dir = "v") +
   scale_y_continuous(limits = c(0, NA)) +
   labs(x = "Age", y = "Proportion", title = "ATS Age Composition Fits")
 ```
@@ -699,7 +708,7 @@ waa_tbl |>
 
 ```{r}
 #| label: tbl-initial-naa
-#| tbl-cap: "Estimated initial numbers-at-age."
+#| tbl-cap: "Estimated initial numbers-at-age in thousands."
 naa_tbl <- est |>
   filter(label == "numbers_at_age") |>
   transmute(year = map_year(year_i), age = age_i, value = estimated) |>
@@ -711,19 +720,19 @@ initial_naa_tbl <- naa_tbl |>
 initial_naa_tbl |>
   gt_report() |>
   fmt_number(columns = value, decimals = 3) |>
-  tab_header(title = "Initial Numbers-at-Age")
+  tab_header(title = "Initial Numbers-at-Age (Thousands)")
 ```
 
 ```{r}
 #| label: tbl-terminal-naa
-#| tbl-cap: "Estimated terminal numbers-at-age."
+#| tbl-cap: "Estimated terminal numbers-at-age in thousands."
 terminal_naa_tbl <- naa_tbl |>
   filter(year == max(year, na.rm = TRUE))
 
 terminal_naa_tbl |>
   gt_report() |>
   fmt_number(columns = value, decimals = 3) |>
-  tab_header(title = "Terminal Numbers-at-Age")
+  tab_header(title = "Terminal Numbers-at-Age (Thousands)")
 ```
 
 ```{r}
