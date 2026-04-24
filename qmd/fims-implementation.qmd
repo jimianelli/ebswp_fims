@@ -36,9 +36,11 @@ gt_report <- function(data, ...) {
   data <- drop_all_na_cols(data)
   table <- gt(data, ...)
 
-  if ("year" %in% names(data)) {
+  integer_cols <- names(data)[tolower(names(data)) %in% c("year", "age")]
+
+  if (length(integer_cols) > 0) {
     table <- table |>
-      fmt_number(columns = "year", decimals = 0, use_seps = FALSE)
+      fmt_number(columns = all_of(integer_cols), decimals = 0, use_seps = FALSE)
   }
 
   table
@@ -47,7 +49,7 @@ gt_report <- function(data, ...) {
 
 # Overview
 
-This document summarizes a simplified FIMS implementation for EBS pollock based on the openMSE inputs. The model is a single-population catch-at-age assessment with one fishery fleet and four index series (BTS, ATS, AVO, and CPUE). Length compositions and seasonal timing are omitted.
+This document summarizes a simplified FIMS implementation for EBS pollock based on inputs from the main 2024 EBS pollock stock assessment ([NPFMC SAFE 2024 EBS pollock assessment](https://files.npfmc.org/SAFE/2024/EBSpollock.pdf)). The model is a single-population catch-at-age assessment with one fishery fleet and four index series (BTS, ATS, AVO, and CPUE). Length compositions and seasonal timing are omitted.
 
 # Data Inputs
 
@@ -848,12 +850,18 @@ parameter_appendix <- est |>
 
 parameter_appendix |>
   gt_report() |>
-  fmt_number(columns = any_of(c("age", "estimate", "sd")), decimals = 3) |>
+  fmt_number(columns = any_of(c("estimate", "sd")), decimals = 3) |>
   tab_header(title = "Appendix: Parameter Estimates")
 ```
+
+# References
+
+Ianelli, J. N., Fissel, B., Holsman, K., Honkalehto, T., Kotwicki, S., Monnahan, C., Siddon, E., and Stienessen, S. 2024. *Assessment of the Walleye Pollock Stock in the Eastern Bering Sea*. North Pacific Fishery Management Council SAFE report. <https://files.npfmc.org/SAFE/2024/EBSpollock.pdf>.
+
+NOAA-FIMS. 2026. *Fisheries Integrated Modeling System (FIMS)*. Version `r fit$version`. GitHub organization and FIMS development repository. Accessed April 24, 2026. <https://github.com/NOAA-FIMS>.
 
 # Notes
 
 - AVO selectivity sharing (`selectivity_shared_with = "ats"`) is not recognized by FIMS ≥ 0.9.0; AVO selectivity is currently estimated independently.
 - ATS weight-at-age is used as the growth input.
-- Composition likelihoods use a multinomial distribution with sample sizes taken from the openMSE inputs.
+- Composition likelihoods use a multinomial distribution with sample sizes taken from the 2024 EBS pollock assessment inputs.
