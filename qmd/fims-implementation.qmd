@@ -187,30 +187,6 @@ $$
 
 where \(y_t\) and \(\hat{y}_t\) are observed and expected landings or index, \(\sigma_t\) is the lognormal SD, \(n_{a,t}\) are age-composition counts (or effective sample sizes), and \(p_{a,t}\) are predicted age proportions.
 
-## SparseNUTS Scaffold
-
-The repository includes a first-pass scaffold for Bayesian sampling with `SparseNUTS` using the existing FIMS/TMB objective. The main entry points are `scripts/sparsenuts_framework.R`, which builds the FIMS objects and exposes helper functions for extracting the TMB objective, and `scripts/03_fit_sparse_nuts.R`, which runs a conditional mode fit followed by `SparseNUTS` sampling.
-
-The intended MCMC workflow is to use the maximum-likelihood fit as an initialization and preconditioning step, then sample the joint posterior for estimable fixed effects with `SparseNUTS`. In this application, that would allow posterior summaries for quantities such as spawning biomass, recruitment, fishing mortality, selectivity parameters, and survey catchability, while retaining the same core FIMS/TMB model structure used for the deterministic fit.
-
-At present this should be treated as an implementation scaffold rather than a validated Bayesian assessment workflow. The code path for building the model object and passing it to `SparseNUTS` is in place, but full end-to-end sampling has not yet been verified for this application, and posterior diagnostics such as divergences, effective sample size, split-\(\hat{R}\), and prior sensitivity have not yet been evaluated. In practice, additional work will likely be needed on parameter blocking, scaling, priors, and possibly on how random effects or transformed parameters are exposed to the sampler.
-
-Once operational, the expected MCMC outputs would include posterior draws saved to `outputs/sparsenuts_fit.rds`, from which trace plots, marginal posterior summaries, posterior intervals for SSB and recruitment, and posterior predictive checks could be added to this report.
-
-An example command is shown below.
-
-```sh
-Rscript scripts/03_fit_sparse_nuts.R \
-  --num-samples=250 \
-  --num-warmup=250 \
-  --chains=4 \
-  --cores=1 \
-  --metric=diag \
-  --seed=123
-```
-
-By default this writes `outputs/sparsenuts_fit.rds`.
-
 # Fit Results
 
 The fitted spawning biomass trajectory is shown in @fig-ssb. Fishery observed and predicted landings are compared in @fig-landings-fit, while survey and CPUE index fits are summarized in @fig-fits-by-fleet and residual patterns are shown in @fig-residuals. These index series are shown on their native arithmetic scales with separate facet scales because the magnitudes differ across surveys and CPUE, and the residuals are standardized by the input observation standard deviations on the arithmetic scale. Expected age-composition outputs for fishery, BTS, and ATS are shown in @fig-agecomp-fishery, @fig-agecomp-bts, and @fig-agecomp-ats, respectively, while selectivity is shown in @fig-selectivity-curves. The time-invariant selectivity assumptions used to initialize each gear are shown for selected years in @fig-selectivity-assumptions. A diagnostics overview, including model status and the fitted SSB and recruitment trajectories, is shown in @tbl-model-status and @fig-ssb-recruitment. Likelihood diagnostics and key parameter summaries are reported in @tbl-diagnostics, @tbl-recruitment-parameters, and @tbl-q.
@@ -804,6 +780,30 @@ survey_agecomp |>
   gt_report(groupname_col = "fleet") |>
   tab_header(title = "Survey Proportions-at-Age (Most Recent Year)")
 ```
+
+## SparseNUTS Scaffold
+
+The repository includes a first-pass scaffold for Bayesian sampling with `SparseNUTS` using the existing FIMS/TMB objective. The main entry points are `scripts/sparsenuts_framework.R`, which builds the FIMS objects and exposes helper functions for extracting the TMB objective, and `scripts/03_fit_sparse_nuts.R`, which runs a conditional mode fit followed by `SparseNUTS` sampling.
+
+The intended MCMC workflow is to use the maximum-likelihood fit as an initialization and preconditioning step, then sample the joint posterior for estimable fixed effects with `SparseNUTS`. In this application, that would allow posterior summaries for quantities such as spawning biomass, recruitment, fishing mortality, selectivity parameters, and survey catchability, while retaining the same core FIMS/TMB model structure used for the deterministic fit.
+
+At present this should be treated as an implementation scaffold rather than a validated Bayesian assessment workflow. The code path for building the model object and passing it to `SparseNUTS` is in place, but full end-to-end sampling has not yet been verified for this application, and posterior diagnostics such as divergences, effective sample size, split-\(\hat{R}\), and prior sensitivity have not yet been evaluated. In practice, additional work will likely be needed on parameter blocking, scaling, priors, and possibly on how random effects or transformed parameters are exposed to the sampler.
+
+Once operational, the expected MCMC outputs would include posterior draws saved to `outputs/sparsenuts_fit.rds`, from which trace plots, marginal posterior summaries, posterior intervals for SSB and recruitment, and posterior predictive checks could be added to this report.
+
+An example command is shown below.
+
+```sh
+Rscript scripts/03_fit_sparse_nuts.R \
+  --num-samples=250 \
+  --num-warmup=250 \
+  --chains=4 \
+  --cores=1 \
+  --metric=diag \
+  --seed=123
+```
+
+By default this writes `outputs/sparsenuts_fit.rds`.
 
 # Appendix
 
