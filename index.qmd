@@ -11,6 +11,41 @@ FIMS configuration in this repository.
 
 - [FIMS implementation report](qmd/fims-implementation.qmd)
 
+## Scripts
+
+| Script | Purpose | Main output |
+|---|---|---|
+| `scripts/01_build_data.R` | Converts the 2024 pollock assessment inputs into the long `FIMSFrame`-ready data table used by the model. | `data/ebs_fims_data.rds` |
+| `scripts/02_fit_model.R` | Builds the FIMS model inputs, fits the maximum-likelihood model, extracts estimates and reports, and saves a compact fit summary. | `outputs/fims_fit_summary.rds` |
+| `scripts/03_fit_sparse_nuts.R` | Command-line scaffold for fitting the FIMS mode and then running `SparseNUTS` on the TMB objective. | `outputs/sparsenuts_fit.rds` |
+| `scripts/04_run_retro_5_peel.R` | Runs 0- through 5-year retrospective peels and summarizes SSB and recruitment trajectories. | `outputs/retro_5_peel_summary.rds` |
+| `scripts/sparsenuts_framework.R` | Shared helper functions for resolving paths, building FIMS inputs, fitting the mode, preparing retrospective peels, and saving `SparseNUTS` output. | Used by fitting, MCMC, and retrospective scripts |
+| `fimsfit.R` | Local FIMS fitting wrapper and `FIMSFit` S4 class utilities used by the application scripts. | Fitted `FIMSFit` objects and accessor outputs |
+
+## Helper Functions
+
+| Function | Source | Brief documentation |
+|---|---|---|
+| `cv_2_sd()` | `scripts/01_build_data.R` | Converts coefficient of variation values to lognormal standard deviations. |
+| `make_index()` | `scripts/01_build_data.R` | Builds complete annual index rows for a fleet, filling missing years with `-999` and reasonable uncertainty values. |
+| `make_agecomp()` | `scripts/01_build_data.R` | Converts age-composition matrices into long-form FIMS age-composition records with annual age grids. |
+| `make_waa()` | `scripts/01_build_data.R` | Creates the complete weight-at-age input, including the terminal year required by FIMS. |
+| `resolve_project_root()` | `scripts/sparsenuts_framework.R` | Finds the repository root from the current working directory. |
+| `default_snuts_control()` | `scripts/sparsenuts_framework.R` | Provides default tuning controls for `SparseNUTS`. |
+| `build_fims_inputs_from_payload()` | `scripts/sparsenuts_framework.R` | Creates `FIMSFrame`, configurations, parameter specifications, and initialized FIMS input from an in-memory payload. |
+| `build_fims_inputs()` | `scripts/sparsenuts_framework.R` | Loads `data/ebs_fims_data.rds` and passes it to `build_fims_inputs_from_payload()`. |
+| `fit_fims_mode_for_snuts()` | `scripts/sparsenuts_framework.R` | Fits the FIMS maximum-likelihood mode and returns both the fit and the built input objects for MCMC. |
+| `make_retro_payload()` | `scripts/sparsenuts_framework.R` | Drops terminal years from data and weight-at-age inputs to create retrospective peel payloads. |
+| `run_sparse_nuts_fims()` | `scripts/sparsenuts_framework.R` | Passes the fitted TMB objective to `SparseNUTS::sample_snuts()`. |
+| `extract_fims_estimates()` | `scripts/sparsenuts_framework.R` | Joins FIMS JSON estimates with TMB parameter estimates and uncertainty output. |
+| `save_sparse_nuts_results()` | `scripts/sparsenuts_framework.R` | Saves MCMC output together with mode diagnostics and basic model-input metadata. |
+| `parse_arg()` | `scripts/03_fit_sparse_nuts.R` | Parses simple command-line options of the form `--name=value`. |
+| `fit_one_peel()` | `scripts/04_run_retro_5_peel.R` | Fits one retrospective peel and extracts SSB and recruitment summaries. |
+| `FIMSFit()` | `fimsfit.R` | Constructs the local S4 fitted-model object used to store input, optimizer output, reports, estimates, timing, and version metadata. |
+| `fit_fims()` | `fimsfit.R` | Builds and optionally optimizes the FIMS/TMB objective, returning a `FIMSFit` object. |
+| `get_*()` accessors | `fimsfit.R` | Access slots from a `FIMSFit` object, including input, report, objective, optimizer output, gradients, estimates, timing, version, and model output. |
+| `is.FIMSFit()` | `fimsfit.R` | Checks whether an object inherits from the local `FIMSFit` class. |
+
 ## Render
 
 To rebuild the site locally:

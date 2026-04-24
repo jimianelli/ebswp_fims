@@ -131,6 +131,45 @@ availability |>
 - **Growth**: empirical WAA from stock-level SSB weights
 - **Maturity**: logistic
 
+The parameter specifications are adjusted from the FIMS defaults before fitting as follows.
+
+```{r}
+#| label: lst-parameter-specifications
+#| eval: false
+#| echo: true
+#| code-fold: false
+cfg <- create_default_configurations(data_4_model) |>
+  tidyr::unnest(cols = data) |>
+  dplyr::rows_update(
+    tibble::tibble(
+      module_name = "Selectivity",
+      fleet_name = c("fishery", "bts", "ats", "avo"),
+      module_type = c("Logistic", "Logistic", "DoubleLogistic", "DoubleLogistic")
+    ),
+    by = c("module_name", "fleet_name")
+  ) |>
+  tidyr::nest(.by = c(model_family, module_name, fleet_name))
+
+pars <- create_default_parameters(cfg, data_4_model) |>
+  tidyr::unnest(cols = data) |>
+  dplyr::rows_update(
+    tibble::tibble(
+      module_name = "Recruitment",
+      label = "log_devs",
+      time = (get_start_year(data_4_model) + 1):get_end_year(data_4_model),
+      estimation_type = "fixed_effects"
+    ),
+    by = c("module_name", "label", "time")
+  ) |>
+  dplyr::mutate(
+    selectivity_shared_with = dplyr::case_when(
+      module_name == "Selectivity" & fleet_name == "cpue" ~ "fishery",
+      module_name == "Selectivity" & fleet_name == "avo" ~ "ats",
+      TRUE ~ NA_character_
+    )
+  )
+```
+
 ## Equations
 
 We use a standard catch-at-age model. Key components are summarized below.

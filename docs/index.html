@@ -153,6 +153,8 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
   <li><a href="#ebs-walleye-pollock-fims" id="toc-ebs-walleye-pollock-fims" class="nav-link active" data-scroll-target="#ebs-walleye-pollock-fims">EBS Walleye Pollock FIMS</a>
   <ul class="collapse">
   <li><a href="#reports" id="toc-reports" class="nav-link" data-scroll-target="#reports">Reports</a></li>
+  <li><a href="#scripts" id="toc-scripts" class="nav-link" data-scroll-target="#scripts">Scripts</a></li>
+  <li><a href="#helper-functions" id="toc-helper-functions" class="nav-link" data-scroll-target="#helper-functions">Helper Functions</a></li>
   <li><a href="#render" id="toc-render" class="nav-link" data-scroll-target="#render">Render</a></li>
   </ul></li>
   </ul>
@@ -188,6 +190,169 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <ul>
 <li><a href="./qmd/fims-implementation.html">FIMS implementation report</a></li>
 </ul>
+</section>
+<section id="scripts" class="level2">
+<h2 class="anchored" data-anchor-id="scripts">Scripts</h2>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Script</th>
+<th>Purpose</th>
+<th>Main output</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>scripts/01_build_data.R</code></td>
+<td>Converts the 2024 pollock assessment inputs into the long <code>FIMSFrame</code>-ready data table used by the model.</td>
+<td><code>data/ebs_fims_data.rds</code></td>
+</tr>
+<tr class="even">
+<td><code>scripts/02_fit_model.R</code></td>
+<td>Builds the FIMS model inputs, fits the maximum-likelihood model, extracts estimates and reports, and saves a compact fit summary.</td>
+<td><code>outputs/fims_fit_summary.rds</code></td>
+</tr>
+<tr class="odd">
+<td><code>scripts/03_fit_sparse_nuts.R</code></td>
+<td>Command-line scaffold for fitting the FIMS mode and then running <code>SparseNUTS</code> on the TMB objective.</td>
+<td><code>outputs/sparsenuts_fit.rds</code></td>
+</tr>
+<tr class="even">
+<td><code>scripts/04_run_retro_5_peel.R</code></td>
+<td>Runs 0- through 5-year retrospective peels and summarizes SSB and recruitment trajectories.</td>
+<td><code>outputs/retro_5_peel_summary.rds</code></td>
+</tr>
+<tr class="odd">
+<td><code>scripts/sparsenuts_framework.R</code></td>
+<td>Shared helper functions for resolving paths, building FIMS inputs, fitting the mode, preparing retrospective peels, and saving <code>SparseNUTS</code> output.</td>
+<td>Used by fitting, MCMC, and retrospective scripts</td>
+</tr>
+<tr class="even">
+<td><code>fimsfit.R</code></td>
+<td>Local FIMS fitting wrapper and <code>FIMSFit</code> S4 class utilities used by the application scripts.</td>
+<td>Fitted <code>FIMSFit</code> objects and accessor outputs</td>
+</tr>
+</tbody>
+</table>
+</section>
+<section id="helper-functions" class="level2">
+<h2 class="anchored" data-anchor-id="helper-functions">Helper Functions</h2>
+<table class="caption-top table">
+<colgroup>
+<col style="width: 33%">
+<col style="width: 33%">
+<col style="width: 33%">
+</colgroup>
+<thead>
+<tr class="header">
+<th>Function</th>
+<th>Source</th>
+<th>Brief documentation</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>cv_2_sd()</code></td>
+<td><code>scripts/01_build_data.R</code></td>
+<td>Converts coefficient of variation values to lognormal standard deviations.</td>
+</tr>
+<tr class="even">
+<td><code>make_index()</code></td>
+<td><code>scripts/01_build_data.R</code></td>
+<td>Builds complete annual index rows for a fleet, filling missing years with <code>-999</code> and reasonable uncertainty values.</td>
+</tr>
+<tr class="odd">
+<td><code>make_agecomp()</code></td>
+<td><code>scripts/01_build_data.R</code></td>
+<td>Converts age-composition matrices into long-form FIMS age-composition records with annual age grids.</td>
+</tr>
+<tr class="even">
+<td><code>make_waa()</code></td>
+<td><code>scripts/01_build_data.R</code></td>
+<td>Creates the complete weight-at-age input, including the terminal year required by FIMS.</td>
+</tr>
+<tr class="odd">
+<td><code>resolve_project_root()</code></td>
+<td><code>scripts/sparsenuts_framework.R</code></td>
+<td>Finds the repository root from the current working directory.</td>
+</tr>
+<tr class="even">
+<td><code>default_snuts_control()</code></td>
+<td><code>scripts/sparsenuts_framework.R</code></td>
+<td>Provides default tuning controls for <code>SparseNUTS</code>.</td>
+</tr>
+<tr class="odd">
+<td><code>build_fims_inputs_from_payload()</code></td>
+<td><code>scripts/sparsenuts_framework.R</code></td>
+<td>Creates <code>FIMSFrame</code>, configurations, parameter specifications, and initialized FIMS input from an in-memory payload.</td>
+</tr>
+<tr class="even">
+<td><code>build_fims_inputs()</code></td>
+<td><code>scripts/sparsenuts_framework.R</code></td>
+<td>Loads <code>data/ebs_fims_data.rds</code> and passes it to <code>build_fims_inputs_from_payload()</code>.</td>
+</tr>
+<tr class="odd">
+<td><code>fit_fims_mode_for_snuts()</code></td>
+<td><code>scripts/sparsenuts_framework.R</code></td>
+<td>Fits the FIMS maximum-likelihood mode and returns both the fit and the built input objects for MCMC.</td>
+</tr>
+<tr class="even">
+<td><code>make_retro_payload()</code></td>
+<td><code>scripts/sparsenuts_framework.R</code></td>
+<td>Drops terminal years from data and weight-at-age inputs to create retrospective peel payloads.</td>
+</tr>
+<tr class="odd">
+<td><code>run_sparse_nuts_fims()</code></td>
+<td><code>scripts/sparsenuts_framework.R</code></td>
+<td>Passes the fitted TMB objective to <code>SparseNUTS::sample_snuts()</code>.</td>
+</tr>
+<tr class="even">
+<td><code>extract_fims_estimates()</code></td>
+<td><code>scripts/sparsenuts_framework.R</code></td>
+<td>Joins FIMS JSON estimates with TMB parameter estimates and uncertainty output.</td>
+</tr>
+<tr class="odd">
+<td><code>save_sparse_nuts_results()</code></td>
+<td><code>scripts/sparsenuts_framework.R</code></td>
+<td>Saves MCMC output together with mode diagnostics and basic model-input metadata.</td>
+</tr>
+<tr class="even">
+<td><code>parse_arg()</code></td>
+<td><code>scripts/03_fit_sparse_nuts.R</code></td>
+<td>Parses simple command-line options of the form <code>--name=value</code>.</td>
+</tr>
+<tr class="odd">
+<td><code>fit_one_peel()</code></td>
+<td><code>scripts/04_run_retro_5_peel.R</code></td>
+<td>Fits one retrospective peel and extracts SSB and recruitment summaries.</td>
+</tr>
+<tr class="even">
+<td><code>FIMSFit()</code></td>
+<td><code>fimsfit.R</code></td>
+<td>Constructs the local S4 fitted-model object used to store input, optimizer output, reports, estimates, timing, and version metadata.</td>
+</tr>
+<tr class="odd">
+<td><code>fit_fims()</code></td>
+<td><code>fimsfit.R</code></td>
+<td>Builds and optionally optimizes the FIMS/TMB objective, returning a <code>FIMSFit</code> object.</td>
+</tr>
+<tr class="even">
+<td><code>get_*()</code> accessors</td>
+<td><code>fimsfit.R</code></td>
+<td>Access slots from a <code>FIMSFit</code> object, including input, report, objective, optimizer output, gradients, estimates, timing, version, and model output.</td>
+</tr>
+<tr class="odd">
+<td><code>is.FIMSFit()</code></td>
+<td><code>fimsfit.R</code></td>
+<td>Checks whether an object inherits from the local <code>FIMSFit</code> class.</td>
+</tr>
+</tbody>
+</table>
 </section>
 <section id="render" class="level2">
 <h2 class="anchored" data-anchor-id="render">Render</h2>
@@ -668,18 +833,53 @@ pre > code.sourceCode > span > a:first-child::before { text-decoration: underlin
 <span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a><span class="ss">- </span><span class="co">[</span><span class="ot">FIMS implementation report</span><span class="co">](qmd/fims-implementation.qmd)</span></span>
 <span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a><span class="fu">## Render</span></span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a><span class="fu">## Scripts</span></span>
 <span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a>To rebuild the site locally:</span>
-<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-18"><a href="#cb2-18" aria-hidden="true" tabindex="-1"></a><span class="in">```sh</span></span>
-<span id="cb2-19"><a href="#cb2-19" aria-hidden="true" tabindex="-1"></a><span class="ex">Rscript</span> scripts/01_build_data.R</span>
-<span id="cb2-20"><a href="#cb2-20" aria-hidden="true" tabindex="-1"></a><span class="ex">Rscript</span> scripts/02_fit_model.R</span>
-<span id="cb2-21"><a href="#cb2-21" aria-hidden="true" tabindex="-1"></a><span class="ex">quarto</span> render</span>
-<span id="cb2-22"><a href="#cb2-22" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
-<span id="cb2-23"><a href="#cb2-23" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-24"><a href="#cb2-24" aria-hidden="true" tabindex="-1"></a>The rendered website is written to <span class="in">`docs/`</span> so it can be served directly by</span>
-<span id="cb2-25"><a href="#cb2-25" aria-hidden="true" tabindex="-1"></a>GitHub Pages.</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button" data-in-quarto-modal=""><i class="bi"></i></button></div>
+<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> Script <span class="pp">|</span> Purpose <span class="pp">|</span> Main output <span class="pp">|</span></span>
+<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a><span class="pp">|---|---|---|</span></span>
+<span id="cb2-18"><a href="#cb2-18" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`scripts/01_build_data.R`</span> <span class="pp">|</span> Converts the 2024 pollock assessment inputs into the long <span class="in">`FIMSFrame`</span>-ready data table used by the model. <span class="pp">|</span> <span class="in">`data/ebs_fims_data.rds`</span> <span class="pp">|</span></span>
+<span id="cb2-19"><a href="#cb2-19" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`scripts/02_fit_model.R`</span> <span class="pp">|</span> Builds the FIMS model inputs, fits the maximum-likelihood model, extracts estimates and reports, and saves a compact fit summary. <span class="pp">|</span> <span class="in">`outputs/fims_fit_summary.rds`</span> <span class="pp">|</span></span>
+<span id="cb2-20"><a href="#cb2-20" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`scripts/03_fit_sparse_nuts.R`</span> <span class="pp">|</span> Command-line scaffold for fitting the FIMS mode and then running <span class="in">`SparseNUTS`</span> on the TMB objective. <span class="pp">|</span> <span class="in">`outputs/sparsenuts_fit.rds`</span> <span class="pp">|</span></span>
+<span id="cb2-21"><a href="#cb2-21" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`scripts/04_run_retro_5_peel.R`</span> <span class="pp">|</span> Runs 0- through 5-year retrospective peels and summarizes SSB and recruitment trajectories. <span class="pp">|</span> <span class="in">`outputs/retro_5_peel_summary.rds`</span> <span class="pp">|</span></span>
+<span id="cb2-22"><a href="#cb2-22" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`scripts/sparsenuts_framework.R`</span> <span class="pp">|</span> Shared helper functions for resolving paths, building FIMS inputs, fitting the mode, preparing retrospective peels, and saving <span class="in">`SparseNUTS`</span> output. <span class="pp">|</span> Used by fitting, MCMC, and retrospective scripts <span class="pp">|</span></span>
+<span id="cb2-23"><a href="#cb2-23" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`fimsfit.R`</span> <span class="pp">|</span> Local FIMS fitting wrapper and <span class="in">`FIMSFit`</span> S4 class utilities used by the application scripts. <span class="pp">|</span> Fitted <span class="in">`FIMSFit`</span> objects and accessor outputs <span class="pp">|</span></span>
+<span id="cb2-24"><a href="#cb2-24" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-25"><a href="#cb2-25" aria-hidden="true" tabindex="-1"></a><span class="fu">## Helper Functions</span></span>
+<span id="cb2-26"><a href="#cb2-26" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-27"><a href="#cb2-27" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> Function <span class="pp">|</span> Source <span class="pp">|</span> Brief documentation <span class="pp">|</span></span>
+<span id="cb2-28"><a href="#cb2-28" aria-hidden="true" tabindex="-1"></a><span class="pp">|---|---|---|</span></span>
+<span id="cb2-29"><a href="#cb2-29" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`cv_2_sd()`</span> <span class="pp">|</span> <span class="in">`scripts/01_build_data.R`</span> <span class="pp">|</span> Converts coefficient of variation values to lognormal standard deviations. <span class="pp">|</span></span>
+<span id="cb2-30"><a href="#cb2-30" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`make_index()`</span> <span class="pp">|</span> <span class="in">`scripts/01_build_data.R`</span> <span class="pp">|</span> Builds complete annual index rows for a fleet, filling missing years with <span class="in">`-999`</span> and reasonable uncertainty values. <span class="pp">|</span></span>
+<span id="cb2-31"><a href="#cb2-31" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`make_agecomp()`</span> <span class="pp">|</span> <span class="in">`scripts/01_build_data.R`</span> <span class="pp">|</span> Converts age-composition matrices into long-form FIMS age-composition records with annual age grids. <span class="pp">|</span></span>
+<span id="cb2-32"><a href="#cb2-32" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`make_waa()`</span> <span class="pp">|</span> <span class="in">`scripts/01_build_data.R`</span> <span class="pp">|</span> Creates the complete weight-at-age input, including the terminal year required by FIMS. <span class="pp">|</span></span>
+<span id="cb2-33"><a href="#cb2-33" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`resolve_project_root()`</span> <span class="pp">|</span> <span class="in">`scripts/sparsenuts_framework.R`</span> <span class="pp">|</span> Finds the repository root from the current working directory. <span class="pp">|</span></span>
+<span id="cb2-34"><a href="#cb2-34" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`default_snuts_control()`</span> <span class="pp">|</span> <span class="in">`scripts/sparsenuts_framework.R`</span> <span class="pp">|</span> Provides default tuning controls for <span class="in">`SparseNUTS`</span>. <span class="pp">|</span></span>
+<span id="cb2-35"><a href="#cb2-35" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`build_fims_inputs_from_payload()`</span> <span class="pp">|</span> <span class="in">`scripts/sparsenuts_framework.R`</span> <span class="pp">|</span> Creates <span class="in">`FIMSFrame`</span>, configurations, parameter specifications, and initialized FIMS input from an in-memory payload. <span class="pp">|</span></span>
+<span id="cb2-36"><a href="#cb2-36" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`build_fims_inputs()`</span> <span class="pp">|</span> <span class="in">`scripts/sparsenuts_framework.R`</span> <span class="pp">|</span> Loads <span class="in">`data/ebs_fims_data.rds`</span> and passes it to <span class="in">`build_fims_inputs_from_payload()`</span>. <span class="pp">|</span></span>
+<span id="cb2-37"><a href="#cb2-37" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`fit_fims_mode_for_snuts()`</span> <span class="pp">|</span> <span class="in">`scripts/sparsenuts_framework.R`</span> <span class="pp">|</span> Fits the FIMS maximum-likelihood mode and returns both the fit and the built input objects for MCMC. <span class="pp">|</span></span>
+<span id="cb2-38"><a href="#cb2-38" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`make_retro_payload()`</span> <span class="pp">|</span> <span class="in">`scripts/sparsenuts_framework.R`</span> <span class="pp">|</span> Drops terminal years from data and weight-at-age inputs to create retrospective peel payloads. <span class="pp">|</span></span>
+<span id="cb2-39"><a href="#cb2-39" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`run_sparse_nuts_fims()`</span> <span class="pp">|</span> <span class="in">`scripts/sparsenuts_framework.R`</span> <span class="pp">|</span> Passes the fitted TMB objective to <span class="in">`SparseNUTS::sample_snuts()`</span>. <span class="pp">|</span></span>
+<span id="cb2-40"><a href="#cb2-40" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`extract_fims_estimates()`</span> <span class="pp">|</span> <span class="in">`scripts/sparsenuts_framework.R`</span> <span class="pp">|</span> Joins FIMS JSON estimates with TMB parameter estimates and uncertainty output. <span class="pp">|</span></span>
+<span id="cb2-41"><a href="#cb2-41" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`save_sparse_nuts_results()`</span> <span class="pp">|</span> <span class="in">`scripts/sparsenuts_framework.R`</span> <span class="pp">|</span> Saves MCMC output together with mode diagnostics and basic model-input metadata. <span class="pp">|</span></span>
+<span id="cb2-42"><a href="#cb2-42" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`parse_arg()`</span> <span class="pp">|</span> <span class="in">`scripts/03_fit_sparse_nuts.R`</span> <span class="pp">|</span> Parses simple command-line options of the form <span class="in">`--name=value`</span>. <span class="pp">|</span></span>
+<span id="cb2-43"><a href="#cb2-43" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`fit_one_peel()`</span> <span class="pp">|</span> <span class="in">`scripts/04_run_retro_5_peel.R`</span> <span class="pp">|</span> Fits one retrospective peel and extracts SSB and recruitment summaries. <span class="pp">|</span></span>
+<span id="cb2-44"><a href="#cb2-44" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`FIMSFit()`</span> <span class="pp">|</span> <span class="in">`fimsfit.R`</span> <span class="pp">|</span> Constructs the local S4 fitted-model object used to store input, optimizer output, reports, estimates, timing, and version metadata. <span class="pp">|</span></span>
+<span id="cb2-45"><a href="#cb2-45" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`fit_fims()`</span> <span class="pp">|</span> <span class="in">`fimsfit.R`</span> <span class="pp">|</span> Builds and optionally optimizes the FIMS/TMB objective, returning a <span class="in">`FIMSFit`</span> object. <span class="pp">|</span></span>
+<span id="cb2-46"><a href="#cb2-46" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`get_*()`</span> accessors <span class="pp">|</span> <span class="in">`fimsfit.R`</span> <span class="pp">|</span> Access slots from a <span class="in">`FIMSFit`</span> object, including input, report, objective, optimizer output, gradients, estimates, timing, version, and model output. <span class="pp">|</span></span>
+<span id="cb2-47"><a href="#cb2-47" aria-hidden="true" tabindex="-1"></a><span class="pp">|</span> <span class="in">`is.FIMSFit()`</span> <span class="pp">|</span> <span class="in">`fimsfit.R`</span> <span class="pp">|</span> Checks whether an object inherits from the local <span class="in">`FIMSFit`</span> class. <span class="pp">|</span></span>
+<span id="cb2-48"><a href="#cb2-48" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-49"><a href="#cb2-49" aria-hidden="true" tabindex="-1"></a><span class="fu">## Render</span></span>
+<span id="cb2-50"><a href="#cb2-50" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-51"><a href="#cb2-51" aria-hidden="true" tabindex="-1"></a>To rebuild the site locally:</span>
+<span id="cb2-52"><a href="#cb2-52" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-53"><a href="#cb2-53" aria-hidden="true" tabindex="-1"></a><span class="in">```sh</span></span>
+<span id="cb2-54"><a href="#cb2-54" aria-hidden="true" tabindex="-1"></a><span class="ex">Rscript</span> scripts/01_build_data.R</span>
+<span id="cb2-55"><a href="#cb2-55" aria-hidden="true" tabindex="-1"></a><span class="ex">Rscript</span> scripts/02_fit_model.R</span>
+<span id="cb2-56"><a href="#cb2-56" aria-hidden="true" tabindex="-1"></a><span class="ex">quarto</span> render</span>
+<span id="cb2-57"><a href="#cb2-57" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
+<span id="cb2-58"><a href="#cb2-58" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-59"><a href="#cb2-59" aria-hidden="true" tabindex="-1"></a>The rendered website is written to <span class="in">`docs/`</span> so it can be served directly by</span>
+<span id="cb2-60"><a href="#cb2-60" aria-hidden="true" tabindex="-1"></a>GitHub Pages.</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button" data-in-quarto-modal=""><i class="bi"></i></button></div>
 </div></div></div></div></div>
 </div> <!-- /content -->
 
