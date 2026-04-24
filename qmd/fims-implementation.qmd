@@ -125,7 +125,7 @@ availability |>
 
 - **Population**: single stock
 - **Fleets**: fishery, BTS, ATS, AVO, CPUE
-- **Recruitment**: Beverton–Holt with fixed-effect deviations
+- **Recruitment**: Beverton-Holt with fixed-effect deviations and fixed recruitment log-SD
 - **Selectivity**: asymptotic logistic for fishery and BTS; estimated double logistic for ATS; fixed double logistic for AVO
 - **Selectivity sharing**: CPUE shares fishery selectivity
 - **Growth**: empirical WAA from stock-level SSB weights
@@ -166,9 +166,22 @@ pars <- create_default_parameters(cfg, data_4_model) |>
   dplyr::rows_update(
     tibble::tibble(
       module_name = "Recruitment",
-      label = "log_devs",
-      time = (get_start_year(data_4_model) + 1):get_end_year(data_4_model),
-      estimation_type = "fixed_effects"
+      label = c(
+        rep("log_devs", length((get_start_year(data_4_model) + 1):get_end_year(data_4_model))),
+        "log_sd"
+      ),
+      time = c(
+        (get_start_year(data_4_model) + 1):get_end_year(data_4_model),
+        NA_real_
+      ),
+      value = c(
+        rep(0, length((get_start_year(data_4_model) + 1):get_end_year(data_4_model))),
+        0.1
+      ),
+      estimation_type = c(
+        rep("fixed_effects", length((get_start_year(data_4_model) + 1):get_end_year(data_4_model))),
+        "constant"
+      )
     ),
     by = c("module_name", "label", "time")
   ) |>
@@ -219,9 +232,22 @@ pars_tvselex_base <- create_default_parameters(cfg_tvselex, data_4_model) |>
   dplyr::rows_update(
     tibble::tibble(
       module_name = "Recruitment",
-      label = "log_devs",
-      time = (get_start_year(data_4_model) + 1):get_end_year(data_4_model),
-      estimation_type = "fixed_effects"
+      label = c(
+        rep("log_devs", length((get_start_year(data_4_model) + 1):get_end_year(data_4_model))),
+        "log_sd"
+      ),
+      time = c(
+        (get_start_year(data_4_model) + 1):get_end_year(data_4_model),
+        NA_real_
+      ),
+      value = c(
+        rep(0, length((get_start_year(data_4_model) + 1):get_end_year(data_4_model))),
+        0.1
+      ),
+      estimation_type = c(
+        rep("fixed_effects", length((get_start_year(data_4_model) + 1):get_end_year(data_4_model))),
+        "constant"
+      )
     ),
     by = c("module_name", "label", "time")
   ) |>
@@ -1227,7 +1253,7 @@ survey_agecomp |>
 
 ## Parameter Estimates
 
-The full `run0` parameter listing is shown in @tbl-parameter-appendix. Standard deviations are reported when they are available in the fitted summary object; blank entries indicate that uncertainty output was not available for that parameter in the current saved fit.
+The full `run0` parameter listing is shown in @tbl-parameter-appendix. A standard-deviation column is included for parameter standard errors, but the current saved FIMS summary does not populate finite standard errors; blank entries indicate that uncertainty output was not available for that parameter in the current saved fit.
 
 ```{r}
 #| label: tbl-parameter-appendix

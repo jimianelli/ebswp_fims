@@ -58,9 +58,22 @@ build_fims_inputs_from_payload <- function(payload) {
     dplyr::rows_update(
       tibble::tibble(
         module_name = "Recruitment",
-        label = "log_devs",
-        time = (get_start_year(data_4_model) + 1):get_end_year(data_4_model),
-        estimation_type = "fixed_effects"
+        label = c(
+          rep("log_devs", length((get_start_year(data_4_model) + 1):get_end_year(data_4_model))),
+          "log_sd"
+        ),
+        time = c(
+          (get_start_year(data_4_model) + 1):get_end_year(data_4_model),
+          NA_real_
+        ),
+        value = c(
+          rep(0, length((get_start_year(data_4_model) + 1):get_end_year(data_4_model))),
+          0.1
+        ),
+        estimation_type = c(
+          rep("fixed_effects", length((get_start_year(data_4_model) + 1):get_end_year(data_4_model))),
+          "constant"
+        )
       ),
       by = c("module_name", "label", "time")
     ) |>
